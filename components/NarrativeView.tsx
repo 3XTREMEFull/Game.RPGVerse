@@ -1,9 +1,8 @@
-
 import React, { useState, useRef, useEffect } from 'react';
-import { Character, NarrativeTurn, DiceType, RollResult, WorldData, TurnResponse, Enemy, MapData } from '../types';
+import { Character, NarrativeTurn, DiceType, RollResult, WorldData, TurnResponse, Enemy, MapData, StatusEffect } from '../types';
 import { processTurn } from '../services/geminiService';
 import { Button } from './Button';
-import { Send, User, Sparkles, Activity, Dices, ChevronDown, Target, Trophy, Skull, Backpack, Heart, Flame, Droplets, Sword, ClipboardList, ScrollText, Map as MapIcon, Compass, ShieldCheck, Box } from 'lucide-react';
+import { Send, User, Sparkles, Activity, Dices, ChevronDown, Target, Trophy, Skull, Backpack, Heart, Flame, Droplets, Sword, ClipboardList, ScrollText, Map as MapIcon, Compass, ShieldCheck, Box, AlertCircle, Clock } from 'lucide-react';
 
 interface NarrativeViewProps {
   characters: Character[];
@@ -12,6 +11,7 @@ interface NarrativeViewProps {
   initialEnemies?: Enemy[];
   karmicDiceEnabled?: boolean;
   initialMapData?: MapData; 
+  onStateChange: (hasEnemies: boolean, gameResult: 'victory' | 'defeat' | null) => void;
 }
 
 interface MechanicLog {
@@ -22,6 +22,19 @@ interface MechanicLog {
   type: 'player-roll' | 'enemy-roll' | 'system-info' | 'damage' | 'gain';
   value?: number; 
 }
+
+const StatusBadge: React.FC<{ status: StatusEffect }> = ({ status }) => (
+    <div className="group relative flex items-center gap-1 bg-red-900/40 text-red-200 border border-red-700/30 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider cursor-help">
+        <AlertCircle size={8} /> {status.name}
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 bg-slate-950 border border-slate-800 p-2 rounded shadow-2xl opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50">
+            <div className="text-amber-400 mb-1 border-b border-slate-800 pb-1 flex items-center justify-between">
+                <span>{status.name}</span>
+                <span className="text-[8px] flex items-center gap-1"><Clock size={8}/> {status.duration}</span>
+            </div>
+            <p className="text-slate-300 font-normal normal-case leading-tight text-[9px]">{status.description}</p>
+        </div>
+    </div>
+);
 
 const MapPin = ({ symbol, label, type = 'poi' }: { symbol: string, label?: string, type?: 'poi' | 'actor' }) => (
     <div className="relative flex flex-col items-center justify-end -mt-8 z-10 group">
@@ -46,91 +59,56 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
     worldData, 
     initialEnemies,
     karmicDiceEnabled = true,
-    initialMapData
+    initialMapData,
+    onStateChange
 }) => {
-  const [activeCharacters, setActiveCharacters] = useState<Character[]>(initialCharacters);
+  const [activeCharacters, setActiveCharacters] = useState<Character[]>(initialCharacters.map(c => ({...c, status: c.status || []})));
   const [history, setHistory] = useState<NarrativeTurn[]>(initialHistory);
   const [actions, setActions] = useState<Record<string, string>>({});
   const [selectedDice, setSelectedDice] = useState<Record<string, DiceType>>({});
   const [isProcessing, setIsProcessing] = useState(false);
   const [gameResult, setGameResult] = useState<'victory' | 'defeat' | null>(null);
-  
-  const [enemies, setEnemies] = useState<Enemy[]>(initialEnemies || []);
-  const [activeTab, setActiveTab] = useState<'combat' | 'logs' | 'map' | 'character' | 'inventory'>('combat');
+  const [enemies, setEnemies] = useState<Enemy[]>(initialEnemies?.map(e => ({...e, status: e.status || []})) || []);
+  const [activeTab, setActiveTab] = useState<'combat' | 'map' | 'character' | 'inventory' | 'logs'>('combat');
   const [mechanicLogs, setMechanicLogs] = useState<MechanicLog[]>([]);
   const [mapData, setMapData] = useState<MapData | null>(initialMapData || null);
   const [karmaMap, setKarmaMap] = useState<Record<string, number>>({});
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const logsBottomRef = useRef<HTMLDivElement>(null);
-
   const diceOptions: DiceType[] = ['D4', 'D6', 'D8', 'D10', 'D12', 'D20', 'D100'];
 
+  // Atualiza a música inicial
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [history]);
+    onStateChange(enemies.length > 0, null);
+  }, []);
 
-  useEffect(() => {
-    if (activeTab === 'logs') {
-        logsBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [mechanicLogs, activeTab]);
-
-  const handleActionChange = (charId: string, value: string) => {
-    setActions(prev => ({ ...prev, [charId]: value }));
-  };
-
-  const handleDiceChange = (charId: string, type: DiceType) => {
-    setSelectedDice(prev => ({ ...prev, [charId]: type }));
-  };
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [history]);
+  useEffect(() => { if (activeTab === 'logs') logsBottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [mechanicLogs, activeTab]);
 
   const addLog = (source: string, content: string, type: MechanicLog['type'], value?: number) => {
-      const newLog: MechanicLog = {
-          id: crypto.randomUUID(),
-          timestamp: Date.now(),
-          source,
-          content,
-          type,
-          value
-      };
-      setMechanicLogs(prev => [...prev, newLog]);
+      setMechanicLogs(prev => [...prev, { id: crypto.randomUUID(), timestamp: Date.now(), source, content, type, value }]);
   };
 
   const rollDie = (type: DiceType, entityId: string): number => {
     const sides = parseInt(type.substring(1));
     let result = Math.floor(Math.random() * sides) + 1;
-
     if (karmicDiceEnabled) {
         const streak = karmaMap[entityId] || 0;
-        if (streak <= -2) {
-             const secondRoll = Math.floor(Math.random() * sides) + 1;
-             result = Math.max(result, secondRoll);
-        } else if (streak >= 2) {
-             const secondRoll = Math.floor(Math.random() * sides) + 1;
-             result = Math.min(result, secondRoll);
-        }
+        if (streak <= -2) result = Math.max(result, Math.floor(Math.random() * sides) + 1);
+        else if (streak >= 2) result = Math.min(result, Math.floor(Math.random() * sides) + 1);
     }
-
     const threshold = Math.ceil(sides / 2);
     const isSuccess = result > threshold;
-
     setKarmaMap(prev => {
         const currentStreak = prev[entityId] || 0;
-        let newStreak = 0;
-        if (isSuccess) {
-            newStreak = currentStreak >= 0 ? Math.min(currentStreak + 1, 5) : 1;
-        } else {
-            newStreak = currentStreak <= 0 ? Math.max(currentStreak - 1, -5) : -1;
-        }
-        return { ...prev, [entityId]: newStreak };
+        return { ...prev, [entityId]: isSuccess ? (currentStreak >= 0 ? Math.min(currentStreak + 1, 5) : 1) : (currentStreak <= 0 ? Math.max(currentStreak - 1, -5) : -1) };
     });
-
     return result;
   };
 
   const submitTurn = async () => {
     if (!worldData) return;
-
     const turnPlayerRolls: Record<string, RollResult> = {};
     activeCharacters.forEach(c => {
       const dieType = selectedDice[c.id] || 'D20';
@@ -138,83 +116,28 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
       turnPlayerRolls[c.id] = { type: dieType, value: result };
       addLog(c.name, `Rolagem de Teste (${dieType})`, 'player-roll', result);
     });
-
     const turnEnemyRolls: Record<string, RollResult> = {};
     enemies.forEach(e => {
         const result = rollDie('D20', e.id);
         turnEnemyRolls[e.id] = { type: 'D20', value: result };
         addLog(e.name, `Teste de Oposição (D20)`, 'enemy-roll', result);
     });
-
-    const playerTurnContent = activeCharacters.map(c => {
-      const action = actions[c.id] || "Aguarda hesitante...";
-      return `> **${c.name}**: ${action}`;
-    }).join('\n');
-
-    const newHistory = [
-      ...history,
-      { role: 'player' as const, content: playerTurnContent, timestamp: Date.now() }
-    ];
-
-    setHistory(newHistory);
+    setHistory(prev => [...prev, { role: 'player', content: activeCharacters.map(c => `> **${c.name}**: ${actions[c.id] || "Aguarda..."}`).join('\n'), timestamp: Date.now() }]);
     setActions({});
     setIsProcessing(true);
-    
     try {
-      const formattedActions = activeCharacters.map(c => ({
-        name: c.name,
-        action: actions[c.id] || "não faz nada especificamente."
-      }));
-
-      const response: TurnResponse = await processTurn(
-          newHistory, 
-          formattedActions, 
-          activeCharacters, 
-          turnPlayerRolls, 
-          worldData, 
-          enemies, 
-          turnEnemyRolls
-      );
-
-      const updatedCharacters = [...activeCharacters];
-
-      if (response.activeEnemies) setEnemies(response.activeEnemies);
-      if (response.mapData) setMapData(response.mapData);
-
-      if (response.attributeChanges) {
-        response.attributeChanges.forEach(change => {
-          const charIndex = updatedCharacters.findIndex(c => c.name === change.characterName);
-          if (charIndex !== -1) {
-              updatedCharacters[charIndex] = {
-                  ...updatedCharacters[charIndex],
-                  attributes: {
-                      ...updatedCharacters[charIndex].attributes,
-                      [change.attribute]: Math.max(1, updatedCharacters[charIndex].attributes[change.attribute] + change.value)
-                  }
-              };
-              const symbol = change.value > 0 ? '+' : '';
-              addLog('Sistema', `${change.characterName}: ${change.attribute} ${symbol}${change.value} (${change.reason})`, 'system-info');
-          }
-        });
-      }
-
+      const response: TurnResponse = await processTurn(history, activeCharacters.map(c => ({name: c.name, action: actions[c.id] || ""})), activeCharacters, turnPlayerRolls, worldData, enemies, turnEnemyRolls);
+      let updatedCharacters = [...activeCharacters];
       if (response.resourceChanges) {
         response.resourceChanges.forEach(change => {
           const charIndex = updatedCharacters.findIndex(c => c.name === change.characterName);
           if (charIndex !== -1) {
-              const char = updatedCharacters[charIndex];
-              const newValue = Math.max(0, char.derived[change.resource] + change.value);
-              updatedCharacters[charIndex] = {
-                  ...char,
-                  derived: { ...char.derived, [change.resource]: newValue }
-              };
-              const resourceName = change.resource === 'hp' ? 'Vida' : change.resource === 'mana' ? 'Mana' : 'Estamina';
-              const isDamage = change.value < 0;
-              addLog('Sistema', `${char.name}: ${resourceName} ${change.value > 0 ? '+' : ''}${change.value}`, isDamage ? 'damage' : 'gain');
+              const res = change.resource;
+              updatedCharacters[charIndex] = { ...updatedCharacters[charIndex], derived: { ...updatedCharacters[charIndex].derived, [res]: Math.max(0, updatedCharacters[charIndex].derived[res] + change.value) } };
+              addLog('Sistema', `${change.characterName}: ${res.toUpperCase()} ${change.value > 0 ? '+' : ''}${change.value}`, change.value < 0 ? 'damage' : 'gain');
           }
         });
       }
-
       if (response.inventoryUpdates) {
         response.inventoryUpdates.forEach(update => {
           const charIndex = updatedCharacters.findIndex(c => c.name === update.characterName);
@@ -230,21 +153,38 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
           }
         });
       }
-
+      if (response.characterStatusUpdates) {
+          response.characterStatusUpdates.forEach(update => {
+              const charIndex = updatedCharacters.findIndex(c => c.name === update.characterName);
+              if (charIndex !== -1) updatedCharacters[charIndex].status = update.status;
+          });
+      }
       setActiveCharacters(updatedCharacters);
+      
+      // Update Enemies and Music State
+      if (response.activeEnemies) {
+          setEnemies(response.activeEnemies.map(e => ({...e, status: e.status || []})));
+      }
+      if (response.mapData) setMapData(response.mapData);
       setHistory(prev => [...prev, { role: 'gm', content: response.storyText, timestamp: Date.now() + 100 }]);
-      if (response.isGameOver && response.gameResult) setGameResult(response.gameResult === 'VICTORY' ? 'victory' : 'defeat');
+      
+      const newGameResult = response.isGameOver && response.gameResult ? (response.gameResult === 'VICTORY' ? 'victory' : 'defeat') : null;
+      if (newGameResult) setGameResult(newGameResult);
+
+      // Notify App about state changes for Music
+      onStateChange(
+        (response.activeEnemies && response.activeEnemies.length > 0) || false,
+        newGameResult
+      );
 
     } catch (error) {
-      console.error(error);
-      setHistory(prev => [...prev, { role: 'gm' as const, content: "Erro na conexão divina...", timestamp: Date.now() }]);
-    } finally {
-      setIsProcessing(false);
-    }
+      setHistory(prev => [...prev, { role: 'gm', content: "Erro na conexão divina...", timestamp: Date.now() }]);
+    } finally { setIsProcessing(false); }
   };
 
   const getHpPercent = (curr: number, max: number) => Math.min(100, Math.max(0, (curr / max) * 100));
-  const allPlayersReady = activeCharacters.every(c => (actions[c.id] || '').length > 0);
+  const hasBackpack = (char: Character) => char.items.some(i => i.name.toLowerCase().includes('mochila'));
+  const getInventoryLimit = (char: Character) => hasBackpack(char) ? 10 : 5;
 
   if (gameResult) {
     return (
@@ -253,9 +193,6 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
           {gameResult === 'victory' ? <Trophy size={80} className="text-amber-500" /> : <Skull size={80} className="text-red-600" />}
         </div>
         <h2 className="text-5xl font-cinzel font-bold text-white">{gameResult === 'victory' ? 'Vitória Lendária' : 'Destino Trágico'}</h2>
-        <p className="text-xl text-slate-300 max-w-2xl font-serif">
-          {gameResult === 'victory' ? `O grupo alcançou o objetivo: "${worldData?.mainObjective}".` : `A jornada chegou ao fim trágico.`}
-        </p>
         <Button onClick={() => window.location.reload()} className="mt-8 px-8 py-3 text-lg">Jogar Novamente</Button>
       </div>
     );
@@ -272,111 +209,81 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
           </div>
         )}
         <div className="flex-1 overflow-y-auto p-6 space-y-6 pt-12">
-          {history.map((turn, index) => {
-              if (turn.role === 'system') return null;
-              const isGm = turn.role === 'gm';
-              return (
-                  <div key={index} className={`flex flex-col ${isGm ? 'items-start' : 'items-end'}`}>
-                      <div className={`max-w-[90%] md:max-w-[80%] rounded-lg p-5 ${isGm ? 'bg-slate-800 border-l-4 border-amber-500 text-slate-200' : 'bg-slate-700/50 border-r-4 border-blue-500 text-slate-300'}`}>
-                        <div className="text-xs uppercase tracking-widest opacity-50 mb-2 font-bold flex items-center gap-2">
-                          {isGm ? "Mestre de Jogo" : <><ScrollText size={14} /> Narrativa do Grupo</>}
-                        </div>
-                        <div className="whitespace-pre-wrap font-serif leading-relaxed">{turn.content}</div>
-                      </div>
-                  </div>
-              );
-          })}
-          {isProcessing && (
-            <div className="flex items-center gap-2 text-amber-500 animate-pulse p-4">
-              <span className="h-2 w-2 bg-amber-500 rounded-full"></span>
-              <span className="h-2 w-2 bg-amber-500 rounded-full animation-delay-200"></span>
-              <span className="h-2 w-2 bg-amber-500 rounded-full animation-delay-400"></span>
-              <span className="text-sm font-cinzel">O destino está sendo escrito...</span>
-            </div>
-          )}
+          {history.map((turn, index) => (
+             turn.role !== 'system' && (
+                <div key={index} className={`flex flex-col ${turn.role === 'gm' ? 'items-start' : 'items-end'}`}>
+                    <div className={`max-w-[90%] md:max-w-[80%] rounded-lg p-5 ${turn.role === 'gm' ? 'bg-slate-800 border-l-4 border-amber-500 text-slate-200' : 'bg-slate-700/50 border-r-4 border-blue-500 text-slate-300'}`}>
+                      <div className="text-xs uppercase tracking-widest opacity-50 mb-2 font-bold flex items-center gap-2">{turn.role === 'gm' ? "Mestre de Jogo" : <><ScrollText size={14} /> Narrativa do Grupo</>}</div>
+                      <div className="whitespace-pre-wrap font-serif leading-relaxed">{turn.content}</div>
+                    </div>
+                </div>
+             )
+          ))}
+          {isProcessing && <div className="flex items-center gap-2 text-amber-500 animate-pulse p-4"><span className="h-2 w-2 bg-amber-500 rounded-full"></span><span className="h-2 w-2 bg-amber-500 rounded-full animation-delay-200"></span><span className="h-2 w-2 bg-amber-500 rounded-full animation-delay-400"></span><span className="text-sm font-cinzel">O destino está sendo escrito...</span></div>}
           <div ref={bottomRef} />
         </div>
         <div className="bg-slate-950 border-t border-slate-800 p-4 md:p-6 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] z-10">
-          <h3 className="text-sm uppercase tracking-widest text-slate-500 mb-4 font-bold flex items-center gap-2"><Send size={14} /> Declarar Ações</h3>
           <div className="grid grid-cols-1 gap-4 mb-4">
             {activeCharacters.map((char) => (
-              <div key={char.id} className="relative group bg-slate-900 border border-slate-800 rounded-lg p-1">
+              <div key={char.id} className="bg-slate-900 border border-slate-800 rounded-lg p-1">
                 <div className="flex items-center justify-between px-2 py-1 mb-1">
                   <div className="text-xs font-bold text-blue-400 flex items-center gap-1"><User size={10} /> {char.name}</div>
-                  <div className="flex gap-2 items-center">
-                    <div className="relative group/dice">
-                        <select value={selectedDice[char.id] || 'D20'} onChange={(e) => handleDiceChange(char.id, e.target.value as DiceType)} className="bg-slate-800 text-amber-500 text-[10px] font-bold py-1 px-2 rounded border border-slate-700 outline-none cursor-pointer appearance-none pr-6 hover:border-amber-500 transition-colors">
-                          {diceOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                        </select>
-                        <ChevronDown size={10} className="absolute right-1 top-1.5 text-amber-500 pointer-events-none" />
-                    </div>
+                  <div className="relative group/dice">
+                    <select value={selectedDice[char.id] || 'D20'} onChange={(e) => setSelectedDice(prev => ({ ...prev, [char.id]: e.target.value as DiceType }))} className="bg-slate-800 text-amber-500 text-[10px] font-bold py-1 px-2 rounded border border-slate-700 outline-none cursor-pointer appearance-none pr-6 hover:border-amber-500 transition-colors">
+                      {diceOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                    </select>
+                    <ChevronDown size={10} className="absolute right-1 top-1.5 text-amber-500 pointer-events-none" />
                   </div>
                 </div>
-                <textarea value={actions[char.id] || ''} onChange={(e) => handleActionChange(char.id, e.target.value)} placeholder={`O que ${char.name} faz?`} rows={2} disabled={isProcessing} className="w-full bg-slate-950/50 rounded p-2 text-sm text-slate-200 focus:bg-slate-900 outline-none resize-none border-none"/>
+                <textarea value={actions[char.id] || ''} onChange={(e) => setActions(prev => ({ ...prev, [char.id]: e.target.value }))} placeholder={`O que ${char.name} faz?`} rows={2} disabled={isProcessing} className="w-full bg-slate-950/50 rounded p-2 text-sm text-slate-200 focus:bg-slate-900 outline-none resize-none border-none"/>
               </div>
             ))}
           </div>
-          <div className="flex justify-end">
-            <Button onClick={submitTurn} disabled={isProcessing} variant={allPlayersReady ? 'primary' : 'secondary'} className="w-full md:w-auto px-8">Enviar Turno</Button>
-          </div>
+          <Button onClick={submitTurn} disabled={isProcessing} variant={activeCharacters.every(c => (actions[c.id] || '').length > 0) ? 'primary' : 'secondary'} className="w-full">Enviar Turno</Button>
         </div>
       </div>
       <div className="w-full md:w-80 bg-slate-900/50 rounded-xl border border-slate-800 shadow-xl overflow-hidden flex flex-col order-1 md:order-2">
         <div className="flex border-b border-slate-800 overflow-x-auto scrollbar-hide">
-            <button onClick={() => setActiveTab('combat')} className={`flex-1 min-w-[50px] py-3 text-xs font-bold uppercase flex items-center justify-center gap-2 transition-colors ${activeTab === 'combat' ? 'bg-slate-800 text-amber-500' : 'bg-slate-950 text-slate-500'}`} title="Combate"><Sword size={14} /></button>
-            <button onClick={() => setActiveTab('map')} className={`flex-1 min-w-[50px] py-3 text-xs font-bold uppercase flex items-center justify-center gap-2 transition-colors ${activeTab === 'map' ? 'bg-slate-800 text-green-400' : 'bg-slate-950 text-slate-500'}`} title="Mapa"><MapIcon size={14} /></button>
-            <button onClick={() => setActiveTab('character')} className={`flex-1 min-w-[50px] py-3 text-xs font-bold uppercase flex items-center justify-center gap-2 transition-colors ${activeTab === 'character' ? 'bg-slate-800 text-blue-400' : 'bg-slate-950 text-slate-500'}`} title="Ficha"><User size={14} /></button>
-            <button onClick={() => setActiveTab('inventory')} className={`flex-1 min-w-[50px] py-3 text-xs font-bold uppercase flex items-center justify-center gap-2 transition-colors ${activeTab === 'inventory' ? 'bg-slate-800 text-amber-100' : 'bg-slate-950 text-slate-500'}`} title="Mochila"><Backpack size={14} /></button>
-            <button onClick={() => setActiveTab('logs')} className={`flex-1 min-w-[50px] py-3 text-xs font-bold uppercase flex items-center justify-center gap-2 transition-colors ${activeTab === 'logs' ? 'bg-slate-800 text-purple-400' : 'bg-slate-950 text-slate-500'}`} title="Logs"><ClipboardList size={14} /></button>
+            {['combat', 'map', 'character', 'inventory', 'logs'].map((tab) => (
+                <button key={tab} onClick={() => setActiveTab(tab as any)} className={`flex-1 min-w-[50px] py-3 text-xs font-bold uppercase flex items-center justify-center transition-colors ${activeTab === tab ? 'bg-slate-800 text-amber-500' : 'bg-slate-950 text-slate-500'}`}>
+                    {tab === 'combat' && <Sword size={14} />}
+                    {tab === 'map' && <MapIcon size={14} />}
+                    {tab === 'character' && <User size={14} />}
+                    {tab === 'inventory' && <Backpack size={14} />}
+                    {tab === 'logs' && <ClipboardList size={14} />}
+                </button>
+            ))}
         </div>
         <div className="p-4 space-y-6 flex-1 overflow-y-auto bg-slate-900/30">
             {activeTab === 'combat' && (
-                <div className="space-y-6 animate-fade-in">
-                    <div>
-                        <h4 className="text-xs text-slate-400 font-bold uppercase mb-3 flex items-center justify-between">Inimigos Ativos <span className="bg-slate-800 px-2 py-0.5 rounded text-[10px] text-slate-500">{enemies.length}</span></h4>
-                        {enemies.length === 0 ? <div className="text-center py-4 border border-dashed border-slate-800 rounded text-slate-600 text-xs italic">Nenhum inimigo visível.</div> : (
-                            <div className="space-y-3">
-                                {enemies.map((enemy, idx) => {
-                                    const hpPercent = getHpPercent(enemy.currentHp, enemy.maxHp);
-                                    return (
-                                        <div key={idx} className="bg-slate-950 border border-slate-800 rounded p-2 relative overflow-hidden">
-                                            <div className="flex justify-between items-center mb-1"><span className="text-sm font-bold text-slate-200">{enemy.name}</span><span className={`text-[9px] px-1.5 rounded uppercase font-bold text-slate-900 ${enemy.difficulty === 'Boss' ? 'bg-amber-500' : enemy.difficulty === 'Elite' ? 'bg-purple-400' : 'bg-slate-400'}`}>{enemy.difficulty}</span></div>
-                                            <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden relative"><div className={`h-full transition-all duration-500 ${hpPercent < 30 ? 'bg-red-500' : hpPercent < 60 ? 'bg-yellow-500' : 'bg-green-500'}`} style={{ width: `${hpPercent}%` }}/></div>
-                                            <div className="flex justify-between mt-1 text-[10px] text-slate-500"><span>HP: {enemy.currentHp}/{enemy.maxHp}</span></div>
-                                        </div>
-                                    );
-                                })}
+                <div className="space-y-4 animate-fade-in">
+                    <h4 className="text-xs text-slate-400 font-bold uppercase mb-3">Inimigos Ativos</h4>
+                    {enemies.length === 0 ? <div className="text-center py-4 border border-dashed border-slate-800 rounded text-slate-600 text-xs italic">Cena tranquila...</div> : (
+                        enemies.map((enemy, idx) => (
+                            <div key={idx} className="bg-slate-950 border border-slate-800 rounded p-2 space-y-2">
+                                <div className="flex justify-between items-center mb-1"><span className="text-xs font-bold text-slate-200">{enemy.name}</span><span className={`text-[8px] px-1.5 rounded uppercase font-bold text-slate-900 ${enemy.difficulty === 'Boss' ? 'bg-amber-500' : 'bg-slate-400'}`}>{enemy.difficulty}</span></div>
+                                <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden relative"><div className={`h-full transition-all duration-500 ${getHpPercent(enemy.currentHp, enemy.maxHp) < 30 ? 'bg-red-500' : 'bg-green-500'}`} style={{ width: `${getHpPercent(enemy.currentHp, enemy.maxHp)}%` }}/></div>
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                    {enemy.status?.map((st, i) => <StatusBadge key={i} status={st} />)}
+                                </div>
                             </div>
-                        )}
-                    </div>
+                        ))
+                    )}
                 </div>
             )}
             {activeTab === 'character' && (
-                <div className="animate-fade-in space-y-6">
+                <div className="animate-fade-in space-y-4">
                     <h4 className="text-xs text-blue-400 font-bold uppercase mb-3 flex items-center gap-2"><ShieldCheck size={14}/> Ficha do Grupo</h4>
                     {activeCharacters.map(char => (
-                        <div key={char.id} className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-3 relative overflow-hidden">
-                            <div className="absolute top-0 right-0 w-1 h-full bg-blue-500/30"></div>
-                            <div>
-                                <h5 className="font-cinzel text-blue-200 text-sm font-bold">{char.name}</h5>
-                                <p className="text-[10px] text-slate-500 uppercase tracking-widest">{char.concept}</p>
-                            </div>
-                            <div className="grid grid-cols-3 gap-2 text-[10px] font-mono border-y border-slate-800/50 py-2">
+                        <div key={char.id} className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-2">
+                            <h5 className="font-cinzel text-blue-200 text-xs font-bold">{char.name}</h5>
+                            <div className="grid grid-cols-3 gap-1 text-[10px] font-mono border-y border-slate-800/30 py-1">
                                 <span className="text-red-400 flex items-center gap-1"><Heart size={10}/> {char.derived.hp}</span>
                                 <span className="text-blue-400 flex items-center gap-1"><Droplets size={10}/> {char.derived.mana}</span>
                                 <span className="text-green-400 flex items-center gap-1"><Flame size={10}/> {char.derived.stamina}</span>
                             </div>
-                            <div className="space-y-2">
-                                <span className="text-[9px] text-amber-500 font-bold uppercase block">Habilidades Escolhidas</span>
-                                {char.skills.map((s, i) => (
-                                    <div key={i} className="bg-slate-900/50 p-2 rounded border border-slate-800/50">
-                                        <div className="flex justify-between items-center mb-1">
-                                            <span className="text-xs font-bold text-amber-100">{s.name}</span>
-                                            <span className="text-[9px] bg-slate-800 px-1 rounded text-slate-400">Nv.{s.level}</span>
-                                        </div>
-                                        <p className="text-[10px] text-slate-400 leading-tight italic">"{s.description}"</p>
-                                    </div>
-                                ))}
+                            <div className="flex flex-wrap gap-1">
+                                {char.status?.map((st, i) => <StatusBadge key={i} status={st} />)}
                             </div>
                         </div>
                     ))}
@@ -384,106 +291,52 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
             )}
             {activeTab === 'inventory' && (
                 <div className="animate-fade-in space-y-6">
-                    <h4 className="text-xs text-amber-500 font-bold uppercase mb-3 flex items-center gap-2"><Backpack size={14}/> Mochila do Grupo</h4>
+                    <h4 className="text-xs text-amber-500 font-bold uppercase mb-3 flex items-center gap-2"><Backpack size={14}/> Inventário</h4>
                     {activeCharacters.map(char => (
-                        <div key={char.id} className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-3">
-                            <h5 className="font-cinzel text-amber-100 text-sm font-bold border-b border-slate-800 pb-1">{char.name}</h5>
-                            {char.items.length === 0 ? (
-                                <p className="text-[10px] text-slate-600 italic">Mochila vazia...</p>
-                            ) : (
-                                <div className="space-y-2">
-                                    {char.items.map((item, i) => (
-                                        <div key={i} className="bg-slate-900/50 p-2 rounded border border-slate-800/50 flex flex-col gap-1">
-                                            <div className="flex items-center gap-2">
-                                                <Box size={10} className="text-amber-500/50" />
-                                                <span className="text-xs font-bold text-slate-200">{item.name}</span>
-                                            </div>
-                                            <p className="text-[10px] text-slate-400 leading-tight">{item.description}</p>
-                                            <div className="text-[9px] bg-amber-500/10 text-amber-400 px-1.5 py-0.5 rounded self-start border border-amber-500/20">
-                                                {item.effect}
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
+                        <div key={char.id} className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-2">
+                            <div className="flex justify-between items-center border-b border-slate-800 pb-1">
+                                <h5 className="font-cinzel text-amber-100 text-[10px] font-bold">{char.name}</h5>
+                                <span className={`text-[10px] font-bold ${char.items.length >= getInventoryLimit(char) ? 'text-red-500' : 'text-slate-500'}`}>{char.items.length}/{getInventoryLimit(char)}</span>
+                            </div>
+                            <div className="space-y-1">
+                                {char.items.map((item, i) => (
+                                    <div key={i} className="bg-slate-900/50 p-1 rounded text-[9px] flex flex-col">
+                                        <span className="font-bold text-slate-200">{item.name}</span>
+                                        <span className="text-amber-500/70">{item.effect}</span>
+                                    </div>
+                                ))}
+                                {char.items.length === 0 && <span className="text-[9px] text-slate-700 italic">Vazio...</span>}
+                            </div>
                         </div>
                     ))}
                 </div>
             )}
-            {activeTab === 'map' && (
-                <div className="animate-fade-in flex flex-col h-full">
+            {activeTab === 'map' && mapData && (
+                <div className="animate-fade-in flex flex-col h-full space-y-4">
                     <h4 className="text-xs text-green-500/80 font-bold uppercase mb-3 flex items-center gap-2"><Compass size={12} /> Cartografia</h4>
-                    {!mapData ? <div className="text-center py-8 text-slate-600 text-xs italic">Mapeando...</div> : (
-                        <div className="space-y-4">
-                             <div className="bg-slate-950 border border-slate-800 rounded p-2 text-center shadow-inner"><h5 className="font-cinzel text-amber-100 text-sm font-bold truncate">{mapData.locationName}</h5></div>
-                             
-                             {/* Fundo do Mapa Estilizado - Pergaminho Ilustrado */}
-                             <div className="relative aspect-square w-full bg-[#e2d1b3] overflow-hidden rounded shadow-2xl border-4 border-amber-900/40 ring-4 ring-slate-900 ring-inset">
-                                {/* Textura de Papel/Ruído */}
-                                <div className="absolute inset-0 opacity-20 pointer-events-none mix-blend-multiply bg-[url('https://www.transparenttextures.com/patterns/handmade-paper.png')]"></div>
-                                
-                                {/* Ilustrações Topográficas Sutis (Linhas de Relevo) */}
-                                <svg className="absolute inset-0 w-full h-full opacity-[0.08] pointer-events-none" viewBox="0 0 100 100">
-                                    <path d="M10,20 Q30,10 50,25 T90,20" fill="none" stroke="black" strokeWidth="0.5" />
-                                    <path d="M5,45 Q25,35 45,50 T85,45" fill="none" stroke="black" strokeWidth="0.3" />
-                                    <path d="M20,70 Q40,60 60,75 T100,70" fill="none" stroke="black" strokeWidth="0.4" />
-                                    <circle cx="20" cy="20" r="15" fill="none" stroke="black" strokeWidth="0.2" strokeDasharray="1 1" />
-                                    <circle cx="80" cy="70" r="10" fill="none" stroke="black" strokeWidth="0.2" strokeDasharray="2 1" />
-                                </svg>
-
-                                {/* Efeito de Dobra com Sombras Aprimoradas */}
-                                <div className="absolute inset-0 pointer-events-none z-10 flex">
-                                    <div className="flex-1 border-r border-black/10 bg-gradient-to-r from-transparent via-white/5 to-black/10"></div>
-                                    <div className="flex-1 border-r border-black/10 bg-gradient-to-l from-transparent via-white/5 to-black/10"></div>
-                                    <div className="flex-1 bg-gradient-to-r from-transparent via-white/5 to-black/5"></div>
+                    <div className="bg-slate-950 border border-slate-800 rounded p-2 text-center shadow-inner"><h5 className="font-cinzel text-amber-100 text-xs font-bold truncate">{mapData.locationName}</h5></div>
+                    <div className="relative aspect-square w-full bg-[#e2d1b3] overflow-hidden rounded shadow-2xl border-4 border-amber-900/40">
+                        <div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/handmade-paper.png')]"></div>
+                        <div className="absolute inset-0 grid grid-cols-5 grid-rows-5 p-4 z-0">
+                            {mapData.grid.map((row, rIdx) => (row.map((cell, cIdx) => (
+                                <div key={`${rIdx}-${cIdx}`} className="flex items-center justify-center relative border-[0.2px] border-black/5">
+                                    {cell === '.' ? <div className="text-[8px] text-black/10 font-bold">+</div> : <MapPin symbol={cell} label={mapData.legend.find(l => l.symbol === cell)?.description} type={['👹', '👤'].some(e => cell.includes(e)) ? 'actor' : 'poi'} />}
                                 </div>
-                                
-                                {/* Manchas de "Tempo" */}
-                                <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_20%_30%,#8b451311_0%,transparent_50%)]"></div>
-                                <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_80%_80%,#8b45130a_0%,transparent_40%)]"></div>
-
-                                {/* Conteúdo da Grade */}
-                                <div className="absolute inset-0 grid grid-cols-5 grid-rows-5 gap-0 p-4 z-0">
-                                    {mapData.grid.map((row, rIdx) => (row.map((cell, cIdx) => (
-                                        <div key={`${rIdx}-${cIdx}`} className="flex items-center justify-center relative border-[0.2px] border-black/5">
-                                            {cell === '.' ? (
-                                                <div className="text-[8px] text-black/10 font-bold select-none">+</div>
-                                            ) : (
-                                                <MapPin symbol={cell} label={mapData.legend.find(l => l.symbol === cell)?.description} type={['👹', '👤'].some(e => cell.includes(e)) ? 'actor' : 'poi'} />
-                                            )}
-                                        </div>
-                                    ))))}
-                                </div>
-                             </div>
-                             
-                             <div className="bg-slate-950/80 rounded border border-slate-800 p-2 shadow-lg backdrop-blur-sm">
-                                <div className="grid grid-cols-1 gap-1.5">
-                                    {mapData.legend.map((item, i) => (
-                                        <div key={i} className="flex items-center gap-2 text-xs bg-slate-900/40 p-1.5 rounded border border-slate-800/50">
-                                            <span className="text-lg leading-none w-6 text-center select-none">{item.symbol}</span>
-                                            <span className="text-slate-300 truncate leading-tight font-serif italic">{item.description}</span>
-                                        </div>
-                                    ))}
-                                </div>
-                             </div>
+                            ))))}
                         </div>
-                    )}
+                    </div>
                 </div>
             )}
             {activeTab === 'logs' && (
-                <div className="h-full flex flex-col animate-fade-in">
-                     <h4 className="text-xs text-purple-400/80 font-bold uppercase mb-3 flex items-center gap-2"><Dices size={12} /> Registro de Testes</h4>
-                    <div className="space-y-2 flex-1">
-                        {mechanicLogs.length === 0 ? <div className="text-center py-8 text-slate-600 text-xs italic">Nenhum teste.</div> : (
-                            mechanicLogs.map((log) => (
-                                <div key={log.id} className="bg-slate-950/80 p-2 rounded border border-slate-800 text-xs">
-                                    <div className="flex justify-between mb-1"><span className={`font-bold ${log.type === 'player-roll' ? 'text-blue-300' : 'text-red-300'}`}>{log.source}</span><span className="text-[10px] text-slate-600">{new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>
-                                    <div className="text-slate-300 flex items-center justify-between"><span>{log.content}</span>{log.value !== undefined && <span className={`font-cinzel text-lg font-bold ml-2 ${log.value === 20 ? 'text-amber-500' : 'text-white'}`}>{log.value}</span>}</div>
-                                </div>
-                            ))
-                        )}
-                        <div ref={logsBottomRef} />
-                    </div>
+                <div className="h-full flex flex-col animate-fade-in space-y-2">
+                    <h4 className="text-xs text-purple-400 font-bold uppercase mb-3 flex items-center gap-2"><Dices size={12} /> Log de Batalha</h4>
+                    {mechanicLogs.map((log) => (
+                        <div key={log.id} className="bg-slate-950/80 p-2 rounded border border-slate-800 text-[10px] space-y-1">
+                            <div className="flex justify-between font-bold"><span className={log.type === 'player-roll' ? 'text-blue-300' : 'text-red-300'}>{log.source}</span><span>{log.value}</span></div>
+                            <div className="text-slate-400 leading-tight">{log.content}</div>
+                        </div>
+                    ))}
+                    <div ref={logsBottomRef} />
                 </div>
             )}
         </div>

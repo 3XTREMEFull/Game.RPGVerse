@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type, Schema } from "@google/genai";
-import { WorldData, Character, NarrativeTurn, Skill, Attributes, RollResult, TurnResponse, DerivedStats, ResourceChange, Item, Enemy, MapData } from "../types";
+import { WorldData, Character, NarrativeTurn, Skill, Attributes, RollResult, TurnResponse, DerivedStats, ResourceChange, Item, Enemy, MapData, StatusEffect, CharacterStatusUpdate } from "../types";
 
 const API_KEY = process.env.API_KEY || '';
 
@@ -360,6 +360,28 @@ export const processTurn = async (
           required: ["characterName", "resource", "value", "reason"]
         }
       },
+      characterStatusUpdates: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            characterName: { type: Type.STRING },
+            status: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  duration: { type: Type.INTEGER }
+                },
+                required: ["name", "description", "duration"]
+              }
+            }
+          },
+          required: ["characterName", "status"]
+        }
+      },
       inventoryUpdates: {
         type: Type.ARRAY,
         items: {
@@ -390,7 +412,19 @@ export const processTurn = async (
                 description: { type: Type.STRING },
                 currentHp: { type: Type.INTEGER },
                 maxHp: { type: Type.INTEGER },
-                difficulty: { type: Type.STRING, enum: ["Minion", "Elite", "Boss"] }
+                difficulty: { type: Type.STRING, enum: ["Minion", "Elite", "Boss"] },
+                status: {
+                    type: Type.ARRAY,
+                    items: {
+                        type: Type.OBJECT,
+                        properties: {
+                            name: { type: Type.STRING },
+                            description: { type: Type.STRING },
+                            duration: { type: Type.INTEGER }
+                        },
+                        required: ["name", "description", "duration"]
+                    }
+                }
             },
             required: ["id", "name", "description", "currentHp", "maxHp", "difficulty"]
         }

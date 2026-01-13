@@ -5,6 +5,7 @@ import { WorldSetup } from './components/WorldSetup';
 import { CharacterCreation } from './components/CharacterCreation';
 import { NarrativeView } from './components/NarrativeView';
 import { startNarrative } from './services/geminiService';
+import { AudioController, MusicTrack } from './components/AudioController';
 import { Scroll, Users, Map, Dices } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -16,6 +17,7 @@ const App: React.FC = () => {
   const [initialMapData, setInitialMapData] = useState<MapData | undefined>(undefined);
   const [loadingStory, setLoadingStory] = useState(false);
   const [karmicDiceEnabled, setKarmicDiceEnabled] = useState(true);
+  const [musicTrack, setMusicTrack] = useState<MusicTrack>('MENU');
 
   // Transition: Setup -> Character Creation
   const handleWorldCreated = (data: WorldData) => {
@@ -30,7 +32,6 @@ const App: React.FC = () => {
     setLoadingStory(true);
     
     try {
-      // GM Generates the intro and potential initial enemies
       const result = await startNarrative(worldData, chars);
       
       setNarrativeHistory([
@@ -39,6 +40,14 @@ const App: React.FC = () => {
       setInitialEnemies(result.activeEnemies || []);
       setInitialMapData(result.mapData);
       setPhase(GamePhase.NARRATIVE);
+      
+      // Initial music state for narrative
+      if (result.activeEnemies && result.activeEnemies.length > 0) {
+        setMusicTrack('COMBAT');
+      } else {
+        setMusicTrack('EXPLORATION');
+      }
+
     } catch (error) {
       console.error("Failed to start story", error);
       alert("Erro ao iniciar a história. Tente novamente.");
@@ -47,8 +56,22 @@ const App: React.FC = () => {
     }
   };
 
+  const handleNarrativeStateChange = (hasEnemies: boolean, gameResult: 'victory' | 'defeat' | null) => {
+    if (gameResult === 'victory') {
+      setMusicTrack('VICTORY');
+    } else if (gameResult === 'defeat') {
+      setMusicTrack('DEFEAT');
+    } else if (hasEnemies) {
+      setMusicTrack('COMBAT');
+    } else {
+      setMusicTrack('EXPLORATION');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 flex flex-col">
+      <AudioController track={musicTrack} />
+
       {/* Header */}
       <header className="bg-slate-900 border-b border-slate-800 p-4 sticky top-0 z-50 shadow-md">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
@@ -116,6 +139,7 @@ const App: React.FC = () => {
             initialEnemies={initialEnemies}
             karmicDiceEnabled={karmicDiceEnabled}
             initialMapData={initialMapData}
+            onStateChange={handleNarrativeStateChange}
           />
         )}
       </main>

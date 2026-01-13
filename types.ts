@@ -43,6 +43,12 @@ export interface Item {
   effect: string; 
 }
 
+export interface StatusEffect {
+  name: string;
+  description: string;
+  duration: number; // turns
+}
+
 export interface Character {
   id: string;
   name: string;
@@ -55,6 +61,7 @@ export interface Character {
   attributes: Attributes;
   derived: DerivedStats;
   items: Item[];
+  status?: StatusEffect[];
 }
 
 export interface Enemy {
@@ -64,6 +71,7 @@ export interface Enemy {
   currentHp: number;
   maxHp: number;
   difficulty: 'Minion' | 'Elite' | 'Boss'; // Define a escala de poder e cor da barra
+  status?: StatusEffect[];
 }
 
 export interface NarrativeTurn {
@@ -98,6 +106,11 @@ export interface ResourceChange {
   reason: string;
 }
 
+export interface CharacterStatusUpdate {
+  characterName: string;
+  status: StatusEffect[];
+}
+
 export interface InventoryUpdate {
   characterName: string;
   item: Item;
@@ -117,6 +130,7 @@ export interface TurnResponse {
   attributeChanges: AttributeChange[];
   resourceChanges: ResourceChange[];
   inventoryUpdates: InventoryUpdate[];
+  characterStatusUpdates?: CharacterStatusUpdate[];
   activeEnemies: Enemy[]; // Lista atualizada de inimigos na cena
   mapData?: MapData; // Novo campo opcional para o mapa
 }
