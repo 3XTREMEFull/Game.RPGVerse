@@ -1,0 +1,5 @@
+{
+  "name": "RPGVerse",
+  "description": "Um motor de RPG textual colaborativo onde a IA atua como Mestre de Jogo, guiando os jogadores por mundos fantásticos.",
+  "requestFramePermissions": []
+}
