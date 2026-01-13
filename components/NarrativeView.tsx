@@ -1,8 +1,9 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { Character, NarrativeTurn, DiceType, RollResult, WorldData, TurnResponse, Enemy, MapData, StatusEffect } from '../types';
 import { processTurn } from '../services/geminiService';
 import { Button } from './Button';
-import { Send, User, Sparkles, Activity, Dices, ChevronDown, Target, Trophy, Skull, Backpack, Heart, Flame, Droplets, Sword, ClipboardList, ScrollText, Map as MapIcon, Compass, ShieldCheck, Box, AlertCircle, Clock } from 'lucide-react';
+import { Send, User, Sparkles, Activity, Dices, ChevronDown, Target, Trophy, Skull, Backpack, Heart, Flame, Droplets, Sword, ClipboardList, ScrollText, Map as MapIcon, Compass, ShieldCheck, Box, AlertCircle, Clock, Plus, XCircle, Zap } from 'lucide-react';
 
 interface NarrativeViewProps {
   characters: Character[];
@@ -23,13 +24,29 @@ interface MechanicLog {
   value?: number; 
 }
 
-const StatusBadge: React.FC<{ status: StatusEffect }> = ({ status }) => (
-    <div className="group relative flex items-center gap-1 bg-red-900/40 text-red-200 border border-red-700/30 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider cursor-help">
+// Definição das Regras de Status
+const AVAILABLE_STATUSES: StatusEffect[] = [
+    { name: 'Sangrando', duration: 3, description: 'O alvo perde 1 ponto de vida no início de cada um de seus turnos.' },
+    { name: 'Queimando', duration: 3, description: 'O alvo está em chamas e sofre 1d4 de dano de fogo por turno.' },
+    { name: 'Envenenado', duration: 3, description: 'O alvo tem Desvantagem em jogadas de ataque e testes de habilidade.' },
+    { name: 'Atordoado', duration: 1, description: 'O alvo perde sua próxima ação e não pode realizar reações.' },
+    { name: 'Caído', duration: 0, description: 'O alvo está derrubado. Defesa reduzida. Gasta metade do movimento para levantar.' },
+    { name: 'Fortificado', duration: 3, description: 'O alvo tem +2 na Defesa/CA temporariamente.' },
+    { name: 'Armadura Quebrada', duration: 0, description: 'A armadura do alvo foi danificada. -2 na Defesa/CA permanentemente até reparo.' },
+];
+
+const StatusBadge: React.FC<{ status: StatusEffect, onRemove?: () => void }> = ({ status, onRemove }) => (
+    <div className="group relative flex items-center gap-1 bg-red-900/40 text-red-200 border border-red-700/30 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider cursor-help hover:bg-red-900/60 transition-colors">
         <AlertCircle size={8} /> {status.name}
+        {onRemove && (
+            <button onClick={(e) => { e.stopPropagation(); onRemove(); }} className="ml-1 hover:text-white text-red-400">
+                <XCircle size={8} />
+            </button>
+        )}
         <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 bg-slate-950 border border-slate-800 p-2 rounded shadow-2xl opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50">
             <div className="text-amber-400 mb-1 border-b border-slate-800 pb-1 flex items-center justify-between">
                 <span>{status.name}</span>
-                <span className="text-[8px] flex items-center gap-1"><Clock size={8}/> {status.duration}</span>
+                <span className="text-[8px] flex items-center gap-1"><Clock size={8}/> {status.duration > 0 ? `${status.duration} T` : '∞'}</span>
             </div>
             <p className="text-slate-300 font-normal normal-case leading-tight text-[9px]">{status.description}</p>
         </div>
@@ -74,6 +91,9 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
   const [mapData, setMapData] = useState<MapData | null>(initialMapData || null);
   const [karmaMap, setKarmaMap] = useState<Record<string, number>>({});
 
+  // UI state for adding statuses
+  const [addingStatusTo, setAddingStatusTo] = useState<{id: string, type: 'enemy' | 'character'} | null>(null);
+
   const bottomRef = useRef<HTMLDivElement>(null);
   const logsBottomRef = useRef<HTMLDivElement>(null);
   const diceOptions: DiceType[] = ['D4', 'D6', 'D8', 'D10', 'D12', 'D20', 'D100'];
@@ -88,6 +108,49 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
 
   const addLog = (source: string, content: string, type: MechanicLog['type'], value?: number) => {
       setMechanicLogs(prev => [...prev, { id: crypto.randomUUID(), timestamp: Date.now(), source, content, type, value }]);
+  };
+
+  const handleAddStatus = (targetId: string, type: 'enemy' | 'character', status: StatusEffect) => {
+      if (type === 'enemy') {
+          setEnemies(prev => prev.map(e => {
+              if (e.id === targetId) {
+                  return { ...e, status: [...(e.status || []), status] };
+              }
+              return e;
+          }));
+          addLog('GM', `Aplicou ${status.name} em Inimigo`, 'system-info');
+      } else {
+          setActiveCharacters(prev => prev.map(c => {
+              if (c.id === targetId) {
+                  return { ...c, status: [...(c.status || []), status] };
+              }
+              return c;
+          }));
+          addLog('GM', `Aplicou ${status.name} em ${activeCharacters.find(c => c.id === targetId)?.name}`, 'system-info');
+      }
+      setAddingStatusTo(null);
+  };
+
+  const handleRemoveStatus = (targetId: string, type: 'enemy' | 'character', index: number) => {
+      if (type === 'enemy') {
+          setEnemies(prev => prev.map(e => {
+              if (e.id === targetId) {
+                  const newStatus = [...(e.status || [])];
+                  newStatus.splice(index, 1);
+                  return { ...e, status: newStatus };
+              }
+              return e;
+          }));
+      } else {
+          setActiveCharacters(prev => prev.map(c => {
+              if (c.id === targetId) {
+                  const newStatus = [...(c.status || [])];
+                  newStatus.splice(index, 1);
+                  return { ...c, status: newStatus };
+              }
+              return c;
+          }));
+      }
   };
 
   const rollDie = (type: DiceType, entityId: string): number => {
@@ -260,11 +323,42 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                     <h4 className="text-xs text-slate-400 font-bold uppercase mb-3">Inimigos Ativos</h4>
                     {enemies.length === 0 ? <div className="text-center py-4 border border-dashed border-slate-800 rounded text-slate-600 text-xs italic">Cena tranquila...</div> : (
                         enemies.map((enemy, idx) => (
-                            <div key={idx} className="bg-slate-950 border border-slate-800 rounded p-2 space-y-2">
-                                <div className="flex justify-between items-center mb-1"><span className="text-xs font-bold text-slate-200">{enemy.name}</span><span className={`text-[8px] px-1.5 rounded uppercase font-bold text-slate-900 ${enemy.difficulty === 'Boss' ? 'bg-amber-500' : 'bg-slate-400'}`}>{enemy.difficulty}</span></div>
+                            <div key={idx} className="bg-slate-950 border border-slate-800 rounded p-2 space-y-2 relative">
+                                <div className="flex justify-between items-center mb-1">
+                                    <span className="text-xs font-bold text-slate-200">{enemy.name}</span>
+                                    <span className={`text-[8px] px-1.5 rounded uppercase font-bold text-slate-900 ${enemy.difficulty === 'Boss' ? 'bg-amber-500' : 'bg-slate-400'}`}>{enemy.difficulty}</span>
+                                </div>
                                 <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden relative"><div className={`h-full transition-all duration-500 ${getHpPercent(enemy.currentHp, enemy.maxHp) < 30 ? 'bg-red-500' : 'bg-green-500'}`} style={{ width: `${getHpPercent(enemy.currentHp, enemy.maxHp)}%` }}/></div>
-                                <div className="flex flex-wrap gap-1 mt-1">
-                                    {enemy.status?.map((st, i) => <StatusBadge key={i} status={st} />)}
+                                <div className="flex flex-wrap items-center gap-1 mt-1 min-h-[20px]">
+                                    {enemy.status?.map((st, i) => (
+                                        <StatusBadge 
+                                            key={i} 
+                                            status={st} 
+                                            onRemove={() => handleRemoveStatus(enemy.id, 'enemy', i)} 
+                                        />
+                                    ))}
+                                    <div className="relative">
+                                        <button 
+                                            onClick={() => setAddingStatusTo(addingStatusTo?.id === enemy.id ? null : {id: enemy.id, type: 'enemy'})}
+                                            className="text-slate-500 hover:text-amber-500 transition-colors bg-slate-900 border border-slate-700 rounded-full p-0.5"
+                                            title="Adicionar Status"
+                                        >
+                                            <Plus size={10} />
+                                        </button>
+                                        {addingStatusTo?.id === enemy.id && addingStatusTo.type === 'enemy' && (
+                                            <div className="absolute top-full left-0 mt-1 w-40 bg-slate-900 border border-slate-700 rounded shadow-xl z-50 animate-fade-in max-h-48 overflow-y-auto">
+                                                {AVAILABLE_STATUSES.map(st => (
+                                                    <button 
+                                                        key={st.name} 
+                                                        className="w-full text-left px-2 py-1.5 text-[9px] hover:bg-slate-800 text-slate-300 hover:text-white border-b border-slate-800 last:border-0"
+                                                        onClick={() => handleAddStatus(enemy.id, 'enemy', st)}
+                                                    >
+                                                        {st.name}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         ))
@@ -282,8 +376,36 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                                 <span className="text-blue-400 flex items-center gap-1"><Droplets size={10}/> {char.derived.mana}</span>
                                 <span className="text-green-400 flex items-center gap-1"><Flame size={10}/> {char.derived.stamina}</span>
                             </div>
-                            <div className="flex flex-wrap gap-1">
-                                {char.status?.map((st, i) => <StatusBadge key={i} status={st} />)}
+                            <div className="flex flex-wrap items-center gap-1 min-h-[20px]">
+                                {char.status?.map((st, i) => (
+                                    <StatusBadge 
+                                        key={i} 
+                                        status={st}
+                                        onRemove={() => handleRemoveStatus(char.id, 'character', i)}
+                                    />
+                                ))}
+                                <div className="relative">
+                                    <button 
+                                        onClick={() => setAddingStatusTo(addingStatusTo?.id === char.id ? null : {id: char.id, type: 'character'})}
+                                        className="text-slate-500 hover:text-blue-400 transition-colors bg-slate-900 border border-slate-700 rounded-full p-0.5"
+                                        title="Adicionar Status"
+                                    >
+                                        <Plus size={10} />
+                                    </button>
+                                    {addingStatusTo?.id === char.id && addingStatusTo.type === 'character' && (
+                                        <div className="absolute top-full left-0 mt-1 w-40 bg-slate-900 border border-slate-700 rounded shadow-xl z-50 animate-fade-in max-h-48 overflow-y-auto">
+                                            {AVAILABLE_STATUSES.map(st => (
+                                                <button 
+                                                    key={st.name} 
+                                                    className="w-full text-left px-2 py-1.5 text-[9px] hover:bg-slate-800 text-slate-300 hover:text-white border-b border-slate-800 last:border-0"
+                                                    onClick={() => handleAddStatus(char.id, 'character', st)}
+                                                >
+                                                    {st.name}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     ))}
