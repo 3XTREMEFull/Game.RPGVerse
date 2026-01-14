@@ -150,6 +150,7 @@ export interface MapData {
 
 export interface TurnResponse {
   storyText: string;
+  systemLogs: string[]; // Logs técnicos formatados para o console
   isGameOver: boolean;
   gameResult?: 'VICTORY' | 'DEFEAT';
   attributeChanges: AttributeChange[];

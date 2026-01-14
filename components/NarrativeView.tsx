@@ -10,6 +10,7 @@ interface NarrativeViewProps {
   initialHistory: NarrativeTurn[];
   worldData?: WorldData;
   initialEnemies?: Enemy[];
+  initialAllies?: Ally[];
   karmicDiceEnabled?: boolean;
   initialMapData?: MapData; 
   onStateChange: (hasEnemies: boolean, gameResult: 'victory' | 'defeat' | null) => void;
@@ -75,6 +76,7 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
     initialHistory, 
     worldData, 
     initialEnemies,
+    initialAllies,
     karmicDiceEnabled = true,
     initialMapData,
     onStateChange
@@ -86,7 +88,7 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [gameResult, setGameResult] = useState<'victory' | 'defeat' | null>(null);
   const [enemies, setEnemies] = useState<Enemy[]>(initialEnemies?.map(e => ({...e, status: e.status || []})) || []);
-  const [activeAllies, setActiveAllies] = useState<Ally[]>([]);
+  const [activeAllies, setActiveAllies] = useState<Ally[]>(initialAllies?.map(a => ({...a, status: a.status || []})) || []);
   const [nearbyItems, setNearbyItems] = useState<Item[]>([]); // Itens no chão
   const [activeTab, setActiveTab] = useState<'combat' | 'map' | 'character' | 'inventory' | 'logs'>('combat');
   const [mechanicLogs, setMechanicLogs] = useState<MechanicLog[]>([]);
@@ -316,21 +318,25 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
       const dieType = selectedDice[c.id] || 'D20';
       const result = rollDie(dieType, c.id);
       turnPlayerRolls[c.id] = { type: dieType, value: result };
-      addLog(c.name, `Rolagem de Teste (${dieType})`, 'player-roll', result);
+      addLog(c.name, `Tentativa de Ação`, 'player-roll', result);
     });
-    const turnEnemyRolls: Record<string, RollResult> = {};
-    enemies.forEach(e => {
-        const result = rollDie('D20', e.id);
-        turnEnemyRolls[e.id] = { type: 'D20', value: result };
-        addLog(e.name, `Teste de Oposição (D20)`, 'enemy-roll', result);
-    });
+
+    // Removido enemyRolls do cliente. A IA rola internamente.
+
     setHistory(prev => [...prev, { role: 'player', content: activeCharacters.map(c => `> **${c.name}**: ${actions[c.id] || "Aguarda..."}`).join('\n'), timestamp: Date.now() }]);
     setActions({});
     setIsProcessing(true);
     try {
-      const response: TurnResponse = await processTurn(history, activeCharacters.map(c => ({name: c.name, action: actions[c.id] || ""})), activeCharacters, turnPlayerRolls, worldData, enemies, activeAllies, turnEnemyRolls);
+      const response: TurnResponse = await processTurn(history, activeCharacters.map(c => ({name: c.name, action: actions[c.id] || ""})), activeCharacters, turnPlayerRolls, worldData, enemies, activeAllies);
       let updatedCharacters = [...activeCharacters];
       
+      // Process System Logs from AI
+      if (response.systemLogs) {
+          response.systemLogs.forEach(log => {
+              addLog('Sistema', log, 'system-info');
+          });
+      }
+
       // Resource Changes
       if (response.resourceChanges) {
         response.resourceChanges.forEach(change => {
@@ -759,22 +765,6 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                     </div>
                 </div>
             )}
-            {activeTab === 'map' && mapData && (
-                <div className="animate-fade-in flex flex-col h-full space-y-4">
-                    <h4 className="text-xs text-green-500/80 font-bold uppercase mb-3 flex items-center gap-2"><Compass size={12} /> Cartografia</h4>
-                    <div className="bg-slate-950 border border-slate-800 rounded p-2 text-center shadow-inner"><h5 className="font-cinzel text-amber-100 text-xs font-bold truncate">{mapData.locationName}</h5></div>
-                    <div className="relative aspect-square w-full bg-[#e2d1b3] overflow-hidden rounded shadow-2xl border-4 border-amber-900/40">
-                        <div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/handmade-paper.png')]"></div>
-                        <div className="absolute inset-0 grid grid-cols-5 grid-rows-5 p-4 z-0">
-                            {mapData.grid?.map((row, rIdx) => (row?.map((cell, cIdx) => (
-                                <div key={`${rIdx}-${cIdx}`} className="flex items-center justify-center relative border-[0.2px] border-black/5">
-                                    {cell === '.' ? <div className="text-[8px] text-black/10 font-bold">+</div> : <MapPin symbol={cell} label={mapData.legend.find(l => l.symbol === cell)?.description} type={['👹', '👤'].some(e => cell.includes(e)) ? 'actor' : 'poi'} />}
-                                </div>
-                            ))))}
-                        </div>
-                    </div>
-                </div>
-            )}
             {activeTab === 'logs' && (
                 <div className="h-full flex flex-col animate-fade-in space-y-2 relative">
                     <div className="flex items-center justify-between mb-2">
@@ -785,8 +775,15 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                     </div>
                     {mechanicLogs.map((log) => (
                         <div key={log.id} className="bg-slate-950/80 p-2 rounded border border-slate-800 text-[10px] space-y-1">
-                            <div className="flex justify-between font-bold"><span className={log.type === 'player-roll' ? 'text-blue-300' : 'text-red-300'}>{log.source}</span><span>{log.value}</span></div>
-                            <div className="text-slate-400 leading-tight">{log.content}</div>
+                            <div className="flex justify-between font-bold">
+                                <span className={log.type === 'player-roll' ? 'text-blue-300' : log.type === 'system-info' ? 'text-slate-400' : 'text-red-300'}>
+                                    {log.source}
+                                </span>
+                                <span>{log.value}</span>
+                            </div>
+                            <div className={`leading-tight ${log.type === 'system-info' && log.content.includes('[SISTEMA]') ? 'text-green-400 font-mono' : 'text-slate-400'}`}>
+                                {log.content}
+                            </div>
                         </div>
                     ))}
                     <div ref={logsBottomRef} />

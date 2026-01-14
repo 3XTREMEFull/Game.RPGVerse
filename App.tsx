@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { GamePhase, WorldData, Character, NarrativeTurn, Enemy, MapData } from './types';
+import { GamePhase, WorldData, Character, NarrativeTurn, Enemy, MapData, Ally } from './types';
 import { WorldSetup } from './components/WorldSetup';
 import { CharacterCreation } from './components/CharacterCreation';
 import { NarrativeView } from './components/NarrativeView';
@@ -14,6 +14,7 @@ const App: React.FC = () => {
   const [characters, setCharacters] = useState<Character[]>([]);
   const [narrativeHistory, setNarrativeHistory] = useState<NarrativeTurn[]>([]);
   const [initialEnemies, setInitialEnemies] = useState<Enemy[]>([]);
+  const [initialAllies, setInitialAllies] = useState<Ally[]>([]);
   const [initialMapData, setInitialMapData] = useState<MapData | undefined>(undefined);
   const [loadingStory, setLoadingStory] = useState(false);
   const [karmicDiceEnabled, setKarmicDiceEnabled] = useState(true);
@@ -38,6 +39,7 @@ const App: React.FC = () => {
         { role: 'gm', content: result.storyText, timestamp: Date.now() }
       ]);
       setInitialEnemies(result.activeEnemies || []);
+      setInitialAllies(result.activeAllies || []);
       setInitialMapData(result.mapData);
       setPhase(GamePhase.NARRATIVE);
       
@@ -137,6 +139,7 @@ const App: React.FC = () => {
             initialHistory={narrativeHistory} 
             worldData={worldData || undefined}
             initialEnemies={initialEnemies}
+            initialAllies={initialAllies}
             karmicDiceEnabled={karmicDiceEnabled}
             initialMapData={initialMapData}
             onStateChange={handleNarrativeStateChange}

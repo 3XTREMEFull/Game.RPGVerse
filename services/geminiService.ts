@@ -7,7 +7,6 @@ const API_KEY = process.env.API_KEY || '';
 const ai = new GoogleGenAI({ apiKey: API_KEY });
 
 // Função helper para tentar reconectar automaticamente em caso de falha
-// Refatorada para ser iterativa e lidar infinitamente com erros de Cota (429)
 async function callWithRetry<T>(fn: () => Promise<T>, maxRetries = 5, initialDelay = 2000): Promise<T> {
   let attempt = 0;
   let delay = initialDelay;
@@ -17,32 +16,21 @@ async function callWithRetry<T>(fn: () => Promise<T>, maxRetries = 5, initialDel
       return await fn();
     } catch (error: any) {
       const errorMessage = error?.message || JSON.stringify(error);
-      // Detecção robusta de erros de cota/limite
       const isQuotaError = errorMessage.includes('429') || 
                            errorMessage.includes('quota') || 
                            errorMessage.includes('resource exhausted') ||
                            errorMessage.includes('Too Many Requests') ||
                            errorMessage.includes('user has exceeded quota');
 
-      // Se for erro de cota, tenta infinitamente (como solicitado). Se for outro erro, respeita o maxRetries.
       const shouldRetry = isQuotaError || attempt < maxRetries;
 
       if (shouldRetry) {
         attempt++;
-        // Se for cota, espera 15s fixos (RPM limit costuma resetar em 1 min, então 4 tentativas cobrem). 
-        // Se for erro genérico, backoff exponencial.
         const waitTime = isQuotaError ? 15000 : delay;
-        
         console.warn(`[Gemini Service] Erro detectado (Tentativa ${attempt}). Tipo: ${isQuotaError ? 'QUOTA/429' : 'GENÉRICO'}. Aguardando ${waitTime}ms...`, error);
-        
         await new Promise(resolve => setTimeout(resolve, waitTime));
-        
-        // Aumenta o delay exponencialmente apenas para erros não-cota
-        if (!isQuotaError) {
-            delay = Math.min(delay * 2, 30000); // Cap em 30s
-        }
+        if (!isQuotaError) delay = Math.min(delay * 2, 30000);
       } else {
-        // Esgotou tentativas de erro genérico
         console.error("Máximo de tentativas excedido para erro genérico.");
         throw error;
       }
@@ -51,54 +39,39 @@ async function callWithRetry<T>(fn: () => Promise<T>, maxRetries = 5, initialDel
 }
 
 const SYSTEM_INSTRUCTION = `
-Você é o Mestre de Jogo (GM) para um RPG textual colaborativo. 
-Seu papel é:
-1. Definir o cenário e temas.
-2. Gerenciar a história e o OBJETIVO FINAL.
-3. Adjudicar ações usando o SISTEMA DE REGRAS ESPECÍFICO abaixo.
-4. Responda SEMPRE em Português do Brasil (pt-BR).
+Você é o Mestre de Jogo (GM) para um RPG textual colaborativo.
 
-=== DIRETRIZES DE NARRATIVA (ALTA PRIORIDADE) ===
-- **ESTILO LITERÁRIO**: Não seja breve. Escreva descrições ricas, atmosféricas e detalhadas. Use metáforas e descreva os sentidos (cheiros, sons, luzes).
-- **RITMO VARIADO**: Não force combate a todo turno. Permita cenas de exploração, mistério, interação social e introspecção.
-- **FOCO NO ENREDO**: Avance a trama principal e as subtramas dos personagens. Use ganchos narrativos baseados nas Motivações dos personagens.
+1. PRINCÍPIO FUNDAMENTAL: UNIVERSALIDADE DAS REGRAS
+• Regra Obrigatória: Todas as regras de dados e mecânicas descritas aplicam-se de forma absolutamente igual a todas as entidades do jogo: Personagens Jogáveis (PJs), Inimigos (NPCs Hostis) e Aliados (NPCs Amigáveis).
+• Objetivo: Garantir justiça e consistência.
 
-=== SISTEMA DE REGRAS (IMUTÁVEL) ===
-ATRIBUTOS (Escala 1-10):
-- FOR (Força), DES (Destreza), CON (Constituição), INT (Inteligência), SAB (Sabedoria), CAR (Carisma), AGI (Agilidade), SOR (Sorte).
-- Modificador = Atributo - 2.
+2. SISTEMA DE ROLAGEM AUTOMÁTICA E SEPARAÇÃO
+• Ação: Você deve executar internamente todas as rolagens necessárias para o jogo (especialmente para Inimigos e Aliados).
+• Para os Jogadores, use o resultado do dado fornecido no prompt (D20), mas calcule os bônus internamente.
+• PROIBIDO: Incluir números de dados, resultados brutos, CDs ou cálculos no texto narrativo principal ('storyText').
+• Processo:
+  1. Decisão Interna: Decida qual dado e bônus usar.
+  2. Rolagem/Cálculo Interno.
+  3. Registro no Log: Gere uma entrada detalhada no array 'systemLogs'.
+  4. Narração Limpa: Produza uma descrição puramente literária no 'storyText'.
 
-AVALIAÇÃO DE DIFICULDADE (DC):
-- DC 8 (Muito Fácil) a DC 22 (Lendária).
+3. LÓGICA DE DADOS (UNIVERSAL)
+• Testes (Ataque, Habilidade, Resistência): Base D20. Sucesso = (d20 + bônus) >= DC.
+• Dano/Cura: d4 (menor), d6 (comum), d8 (versátil), d10/d12 (pesado).
 
-FÓRMULA DE TESTE & BÔNUS DE ITENS:
-- 1d20 + Modificador + Habilidade >= DC Escolhida.
-- **IMPORTANTE: SLOT 'MÃOS' (hands)**:
-  - Se o jogador atacar ou agir usando o item equipado no slot 'hands', você DEVE:
-    1. **NARRATIVA**: Descrever explicitamente o uso daquele item (ex: "Você dispara sua Pistola M9...", "Você brande seu Machado...").
-    2. **MECÂNICA**: Aplicar AUTOMATICAMENTE o 'effect' do item ao resultado. Se o item diz "+2 em ataque", some +2 mentalmente ao dado do jogador para definir o sucesso. Se diz "+1d4 dano de fogo", aplique esse dano extra na resolução.
-  - Não pergunte se ele quer usar. Se está equipado e a ação é compatível (ex: Ataque), assuma o uso.
+4. FORMATO OBRIGATÓRIO DO REGISTRO NO LOG ('systemLogs')
+• Cada entrada no array deve seguir estritamente este formato string:
+"[SISTEMA] [Entidade/Ação]: [Resultado Total] em [Tipo de Dado] + [Bônus] (Alvo: [CD] ou 'Dano/Cura'). [STATUS]"
+• Exemplos:
+  - "[SISTEMA] Ataque do Herói (Espada): 18 em d20 + 5 (Alvo: Defesa 15). SUCESSO."
+  - "[SISTEMA] Dano do Orc (Machado): 7 em d8 + 3 (Alvo: Dano)."
 
-COMBATE, INIMIGOS E ALIADOS:
-- Defina HP baseado na dificuldade (Minion: 10-20, Elite: 40-80, Boss: 150+).
-- **USO OBRIGATÓRIO DE DADOS DE INIMIGOS**: O prompt fornecerá as rolagens D20 para cada inimigo. USE esses valores para determinar se eles acertam ou erram os jogadores.
+5. COMBATE & RECURSOS
+• Use valores NEGATIVOS para Dano/Perda (-10) e POSITIVOS para Cura (+5) em 'resourceChanges'.
+• Item 'hands': Se o jogador atacar, verifique o item equipado em 'hands'. Aplique seu efeito mecânico automaticamente e narre seu uso.
 
-RECURSOS & MATEMÁTICA (CRÍTICO):
-- **REGRA DE SINAL**: Para DANO ou CUSTO, você DEVE usar valores **NEGATIVOS** (ex: -10 HP, -5 Mana). Para CURA ou RECUPERAÇÃO, use valores POSITIVOS (ex: +5 HP).
-- **LOG DE BATALHA**: Ao causar dano em um INIMIGO ou ALIADO, adicione uma entrada em 'resourceChanges'.
-
-LOOT & ITENS E EQUIPAMENTOS:
-- **CLASSIFICAÇÃO DE ITENS**:
-  - Use o campo 'type' para definir o tipo de item: 'consumable' (poções, comida), 'equipment' (armas, roupas) ou 'misc'.
-- **SLOTS DE EQUIPAMENTO**:
-  - 'hands': Armas, Varinhas, Escudos, Ferramentas. (ESTE É O SLOT PRINCIPAL DE ATAQUE).
-  - 'back': Mochilas.
-  - 'chest': Armaduras, Roupas.
-- Ao gerar itens iniciais, garanta que pelo menos um seja uma ARMA ou FERRAMENTA para o slot 'hands' com um efeito mecânico claro (ex: "Faca Curta", effect: "+1 em rolagens de acerto").
-
-MAPA & NAVEGAÇÃO:
-- O mapa é uma grade 5x5 representando a REGIÃO IMEDIATA.
-- Use Emojis para Personagens (👤), Inimigos (👹) e Aliados (🛡️).
+6. ESTRUTURA
+• Responda SEMPRE em Português do Brasil (pt-BR).
 `;
 
 const MODEL_NAME = "gemini-3-flash-preview";
@@ -223,13 +196,13 @@ export const generateCharacterDetails = async (world: WorldData, characterConcep
   });
 };
 
-export const startNarrative = async (world: WorldData, characters: Character[]): Promise<{ storyText: string; activeEnemies: Enemy[]; mapData: MapData }> => {
+export const startNarrative = async (world: WorldData, characters: Character[]): Promise<{ storyText: string; activeEnemies: Enemy[]; activeAllies: Ally[]; mapData: MapData }> => {
   const characterDescriptions = characters.map(c => `- ${c.name} (${c.concept})`).join('\n');
 
   const schema: Schema = {
     type: Type.OBJECT,
     properties: {
-        storyText: { type: Type.STRING, description: "A descrição longa e imersiva da cena inicial (mínimo 2 parágrafos)." },
+        storyText: { type: Type.STRING, description: "A descrição longa e imersiva da cena inicial." },
         activeEnemies: {
             type: Type.ARRAY,
             items: {
@@ -247,6 +220,24 @@ export const startNarrative = async (world: WorldData, characters: Character[]):
                     difficulty: { type: Type.STRING, enum: ["Minion", "Elite", "Boss"] }
                 },
                 required: ["id", "name", "description", "currentHp", "maxHp", "currentMana", "maxMana", "currentStamina", "maxStamina", "difficulty"]
+            }
+        },
+        activeAllies: {
+            type: Type.ARRAY,
+            items: {
+                type: Type.OBJECT,
+                properties: {
+                    id: { type: Type.STRING },
+                    name: { type: Type.STRING },
+                    description: { type: Type.STRING },
+                    currentHp: { type: Type.INTEGER },
+                    maxHp: { type: Type.INTEGER },
+                    currentMana: { type: Type.INTEGER },
+                    maxMana: { type: Type.INTEGER },
+                    currentStamina: { type: Type.INTEGER },
+                    maxStamina: { type: Type.INTEGER }
+                },
+                required: ["id", "name", "description", "currentHp", "maxHp", "currentMana", "maxMana", "currentStamina", "maxStamina"]
             }
         },
         mapData: {
@@ -276,7 +267,7 @@ export const startNarrative = async (world: WorldData, characters: Character[]):
             required: ["locationName", "grid", "legend"]
         }
     },
-    required: ["storyText", "activeEnemies", "mapData"]
+    required: ["storyText", "activeEnemies", "activeAllies", "mapData"]
   };
 
   const prompt = `
@@ -287,7 +278,10 @@ export const startNarrative = async (world: WorldData, characters: Character[]):
   Conflito: ${world.coreConflict}
 
   Escreva uma introdução longa e atmosférica. Estabeleça o cenário com detalhes sensoriais.
-  Se houver perigo imediato, gere inimigos. Se for uma cena de exploração/mistério, a lista de inimigos pode ser vazia.
+  Se houver perigo imediato, gere inimigos. 
+  
+  **CORREÇÃO DE ALIADOS**: Analise os backgrounds e conexões dos personagens. Se eles tiverem aliados lógicos presentes na cena (ex: pets, escudeiros, NPCs da história), você DEVE gerá-los e colocá-los na lista 'activeAllies'.
+
   IMPORTANTE: Gere o mapa (mapData) correspondente à cena inicial com Locais de Interesse (POIs) e a posição inicial dos personagens.
   `;
 
@@ -303,7 +297,7 @@ export const startNarrative = async (world: WorldData, characters: Character[]):
     });
 
     if (!response.text) throw new Error("Resposta vazia da IA");
-    return JSON.parse(response.text) as { storyText: string; activeEnemies: Enemy[]; mapData: MapData };
+    return JSON.parse(response.text) as { storyText: string; activeEnemies: Enemy[]; activeAllies: Ally[]; mapData: MapData };
   });
 };
 
@@ -315,7 +309,7 @@ export const processTurn = async (
   world: WorldData,
   currentEnemies: Enemy[],
   currentAllies: Ally[] = [],
-  enemyRolls: Record<string, RollResult> = {}
+  // Removido enemyRolls do cliente. A IA rola internamente.
 ): Promise<TurnResponse> => {
   const context = history.map(h => {
       if (h.role === 'system') return `[SISTEMA]: ${h.content}`;
@@ -330,7 +324,6 @@ export const processTurn = async (
     const stats = JSON.stringify(char.attributes);
     const derived = JSON.stringify(char.derived);
     
-    // Explicitamente destacar o item nas mãos para a IA
     const handsItem = char.equipment?.hands;
     const handsInfo = handsItem 
         ? `[ITEM EQUIPADO NAS MÃOS (ARMA PRINCIPAL): "${handsItem.name}". EFEITO MECÂNICO: "${handsItem.effect}". NARRATIVA: Use este item para descrever a ação se for um ataque/uso de ferramenta.]` 
@@ -338,26 +331,30 @@ export const processTurn = async (
     
     const otherEquipment = `Outros Equipamentos: ${JSON.stringify({ chest: char.equipment?.chest, back: char.equipment?.back })}`;
 
-    return `PERSONAGEM: ${p.name}\n- AÇÃO DECLARADA: "${p.action}"\n- ROLAGEM: ${roll.type}(${roll.value})\n- ${handsInfo}\n- STATS: ${stats}\n- RECURSOS: ${derived}\n- ${otherEquipment}`;
+    return `PERSONAGEM: ${p.name}\n- AÇÃO DECLARADA: "${p.action}"\n- ROLAGEM DO JOGADOR: ${roll.type}(${roll.value}) (Aplique os bônus internamente)\n- ${handsInfo}\n- STATS: ${stats}\n- RECURSOS: ${derived}\n- ${otherEquipment}`;
   }).join('\n\n');
 
   const enemyContext = currentEnemies.length > 0 
-    ? `INIMIGOS ATIVOS E SUAS ROLAGENS (D20) PARA ESTA RODADA:
+    ? `INIMIGOS ATIVOS (IA CONTROLA E ROLA DADOS INTERNAMENTE):
        ${currentEnemies.map(e => {
-           const roll = enemyRolls[e.id];
-           return `- ${e.name} (${e.difficulty}, HP:${e.currentHp}, MP:${e.currentMana}, ST:${e.currentStamina}): ROLAGEM D20 = ${roll ? roll.value : 'N/A'}`;
+           return `- ${e.name} (${e.difficulty}, HP:${e.currentHp}, MP:${e.currentMana}, ST:${e.currentStamina})`;
        }).join('\n')}`
     : "NENHUM INIMIGO ATIVO.";
 
   const allyContext = currentAllies.length > 0
-    ? `ALIADOS ATIVOS (CONTROLE ELES):
+    ? `ALIADOS ATIVOS (IA CONTROLA E ROLA DADOS INTERNAMENTE):
        ${currentAllies.map(a => `- ${a.name} (HP: ${a.currentHp}, MP: ${a.currentMana})`).join('\n')}`
     : "NENHUM ALIADO ATIVO.";
 
   const schema: Schema = {
     type: Type.OBJECT,
     properties: {
-      storyText: { type: Type.STRING, description: "Narrativa literária longa. Descreva o ambiente, reações e consequências." },
+      storyText: { type: Type.STRING, description: "Narrativa literária pura. SEM NÚMEROS DE DADOS, SEM CDs." },
+      systemLogs: { 
+        type: Type.ARRAY, 
+        items: { type: Type.STRING }, 
+        description: "Lista de strings formatadas: '[SISTEMA] [Ação]: [Resultado]...'. OBRIGATÓRIO para todas as rolagens." 
+      },
       isGameOver: { type: Type.BOOLEAN },
       gameResult: { type: Type.STRING, enum: ["VICTORY", "DEFEAT", "ONGOING"] },
       attributeChanges: {
@@ -380,7 +377,7 @@ export const processTurn = async (
           properties: {
             characterName: { type: Type.STRING },
             resource: { type: Type.STRING },
-            value: { type: Type.INTEGER, description: "O valor numérico da mudança. IMPORTANTE: Use NÚMEROS NEGATIVOS para dano/perda (ex: -10) e POSITIVOS para cura/ganho (ex: +10)." },
+            value: { type: Type.INTEGER, description: "Negativo para dano, positivo para cura." },
             reason: { type: Type.STRING }
           },
           required: ["characterName", "resource", "value", "reason"]
@@ -534,7 +531,7 @@ export const processTurn = async (
         required: ["locationName", "grid", "legend"]
       }
     },
-    required: ["storyText", "isGameOver", "attributeChanges", "resourceChanges", "inventoryUpdates", "activeEnemies", "activeAllies", "nearbyItems", "mapData"]
+    required: ["storyText", "systemLogs", "isGameOver", "attributeChanges", "resourceChanges", "inventoryUpdates", "activeEnemies", "activeAllies", "nearbyItems", "mapData"]
   };
 
   const prompt = `
@@ -544,22 +541,19 @@ export const processTurn = async (
   HISTÓRICO RECENTE:
   ${context.slice(-8000)} 
 
-  CONTEXTO DE COMBATE E ROLAGENS DOS INIMIGOS:
+  CONTEXTO DE COMBATE INIMIGO E ALIADO:
   ${enemyContext}
-
-  CONTEXTO DE ALIADOS:
   ${allyContext}
 
   AÇÕES DA RODADA (JOGADORES):
   ${actionContext}
 
   INSTRUÇÕES FINAIS:
-  - Escreva como um autor de fantasia.
-  - **ITEM NAS MÃOS**: Se o jogador atacou, VERIFIQUE se há um item nas MÃOS (hands). Se houver, descreva o ataque usando essa arma e APLIQUE o bônus mecânico do item na resolução.
-  - Se houver combate, use as rolagens fornecidas para narrar o sucesso/falha dos inimigos.
-  - Se jogadores persuadirem NPCs com sucesso, mova-os de Inimigos para Aliados.
-  - **LOOT**: Se itens forem encontrados, coloque-os em 'nearbyItems'. Se um item for uma mochila, defina slot='back' e capacityBonus.
-  - Gerencie HP, Mana e Estamina dos inimigos, aliados e jogadores rigorosamente.
+  - **SEPARAÇÃO RIGOROSA**:
+    1. 'systemLogs': Aqui você coloca os cálculos. Ex: "[SISTEMA] Goblin (Ataque): 15 em d20 + 3 (vs Defesa 14). SUCESSO."
+    2. 'storyText': Aqui você escreve a cena LITERÁRIA. "O goblin salta e corta seu braço." (SEM NÚMEROS).
+  - **ITEM NAS MÃOS**: Se o jogador atacou, descreva usando a arma equipada.
+  - **ROLA AS AÇÕES DA IA**: Você deve decidir e rolar (internamente) para todos os Inimigos e Aliados.
   - **LOG**: O campo resourceChanges deve conter TODAS as mudanças numéricas da rodada.
   - **MAPA**: ATUALIZE o mini-mapa 5x5.
   `;
