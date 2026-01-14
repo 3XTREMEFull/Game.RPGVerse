@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Volume2, VolumeX, Music, PlayCircle } from 'lucide-react';
+import { Volume2, VolumeX, Music, PlayCircle, AlertTriangle } from 'lucide-react';
 
 export type MusicTrack = 'MENU' | 'EXPLORATION' | 'COMBAT' | 'VICTORY' | 'DEFEAT';
 
@@ -8,25 +8,37 @@ interface AudioControllerProps {
   track: MusicTrack;
 }
 
-// URLs de músicas 8-bit livres de direitos (Placeholder)
+// URLs atualizadas para usar o redirecionador estável do Archive.org
 const TRACK_URLS: Record<MusicTrack, string> = {
-  MENU: "https://ia800104.us.archive.org/24/items/ChiptuneSongs/03.Black%20Hole.mp3",
-  EXPLORATION: "https://ia800104.us.archive.org/24/items/ChiptuneSongs/01.A%20Night%20Of%20Dizzy%20Spells.mp3",
-  COMBAT: "https://ia800104.us.archive.org/24/items/ChiptuneSongs/02.TurnTheTide.mp3",
-  VICTORY: "https://ia600504.us.archive.org/11/items/8-bit-music-pack-loopable/Victory%20%28Loopable%29.mp3",
-  DEFEAT: "https://ia600504.us.archive.org/11/items/8-bit-music-pack-loopable/Game%20Over%20%28Loopable%29.mp3"
+  MENU: "https://archive.org/download/ChiptuneSongs/03.Black%20Hole.mp3",
+  EXPLORATION: "https://archive.org/download/ChiptuneSongs/01.A%20Night%20Of%20Dizzy%20Spells.mp3",
+  COMBAT: "https://archive.org/download/ChiptuneSongs/02.TurnTheTide.mp3",
+  VICTORY: "https://archive.org/download/8-bit-music-pack-loopable/Victory%20%28Loopable%29.mp3",
+  DEFEAT: "https://archive.org/download/8-bit-music-pack-loopable/Game%20Over%20%28Loopable%29.mp3"
 };
 
 export const AudioController: React.FC<AudioControllerProps> = ({ track }) => {
   const [volume, setVolume] = useState(0.3);
   const [isMuted, setIsMuted] = useState(false);
   const [waitingForInteraction, setWaitingForInteraction] = useState(false);
+  const [hasError, setHasError] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     if (!audioRef.current) {
         audioRef.current = new Audio();
         audioRef.current.loop = true;
+        
+        // Listener global de erro para o elemento de áudio
+        audioRef.current.onerror = (e) => {
+            console.error("Erro no player de áudio:", audioRef.current?.error);
+            setHasError(true);
+        };
+        
+        // Listener para recuperação automática se possível
+        audioRef.current.oncanplay = () => {
+            setHasError(false);
+        };
     }
 
     const audio = audioRef.current;
@@ -34,10 +46,14 @@ export const AudioController: React.FC<AudioControllerProps> = ({ track }) => {
     const playMusic = async () => {
         try {
             const trackUrl = TRACK_URLS[track];
+            // Reset erro ao tentar nova faixa
+            setHasError(false);
+
             // Apenas altera o source se for diferente para evitar reinício da música
             if (audio.src !== trackUrl) {
                 audio.src = trackUrl;
                 audio.volume = isMuted ? 0 : volume;
+                audio.load(); // Força recarregamento para garantir novo source
             }
             
             // Tenta dar play
@@ -49,7 +65,8 @@ export const AudioController: React.FC<AudioControllerProps> = ({ track }) => {
                 console.warn("Autoplay bloqueado. Aguardando interação do usuário.");
                 setWaitingForInteraction(true);
             } else {
-                console.error("Erro de áudio:", e);
+                console.error("Erro ao tentar tocar áudio:", e);
+                // Não setamos erro visual aqui imediatamente, deixamos o onerror pegar falhas de source
             }
         }
     };
@@ -85,8 +102,17 @@ export const AudioController: React.FC<AudioControllerProps> = ({ track }) => {
       );
   }
 
+  if (hasError) {
+      return (
+        <div className="fixed bottom-4 right-4 z-50 bg-red-900/90 border border-red-700 p-2 rounded-lg shadow-xl flex items-center gap-2 backdrop-blur-sm animate-fade-in text-red-200">
+            <AlertTriangle size={16} />
+            <span className="text-[10px] font-bold uppercase">Áudio Indisponível</span>
+        </div>
+      );
+  }
+
   return (
-    <div className="fixed bottom-4 right-4 z-50 bg-slate-900/90 border border-slate-700 p-2 rounded-lg shadow-xl flex items-center gap-3 backdrop-blur-sm animate-fade-in group">
+    <div className="fixed bottom-4 right-4 z-50 bg-slate-900/90 border border-slate-700 p-2 rounded-lg shadow-xl flex items-center gap-3 backdrop-blur-sm animate-fade-in group transition-all hover:bg-slate-900">
       <div className="flex flex-col">
           <span className="text-[8px] font-bold text-amber-500 uppercase tracking-widest mb-1 flex items-center gap-1">
             <Music size={8} /> 8-Bit Audio

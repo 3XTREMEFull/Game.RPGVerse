@@ -37,10 +37,16 @@ export interface DerivedStats {
   mana: number;    // 5 + (INT * 3)
 }
 
+export type EquipmentSlot = 'back' | 'chest' | 'legs';
+
 export interface Item {
+  id?: string; // Unique ID to prevent duplication
   name: string;
   description: string;
-  effect: string; 
+  effect: string;
+  type?: 'consumable' | 'equipment' | 'misc'; // Classification for UI actions
+  slot?: EquipmentSlot; // If defined, it can be equipped
+  capacityBonus?: number; // Only for 'back' items (backpacks)
 }
 
 export interface StatusEffect {
@@ -61,6 +67,7 @@ export interface Character {
   attributes: Attributes;
   derived: DerivedStats;
   items: Item[];
+  equipment: Partial<Record<EquipmentSlot, Item>>; // Equipped items do not count towards inventory limit
   status?: StatusEffect[];
 }
 
@@ -70,7 +77,25 @@ export interface Enemy {
   description: string;
   currentHp: number;
   maxHp: number;
-  difficulty: 'Minion' | 'Elite' | 'Boss'; // Define a escala de poder e cor da barra
+  currentMana: number;     
+  maxMana: number;         
+  currentStamina: number;  
+  maxStamina: number;      
+  difficulty: 'Minion' | 'Elite' | 'Boss'; 
+  status?: StatusEffect[];
+}
+
+// Interface idêntica a Enemy, mas semanticamente diferente para a UI
+export interface Ally {
+  id: string;
+  name: string;
+  description: string;
+  currentHp: number;
+  maxHp: number;
+  currentMana: number;     
+  maxMana: number;         
+  currentStamina: number;  
+  maxStamina: number;      
   status?: StatusEffect[];
 }
 
@@ -100,7 +125,7 @@ export interface AttributeChange {
 }
 
 export interface ResourceChange {
-  characterName: string;
+  characterName: string; // Pode ser nome de Personagem ou Inimigo
   resource: 'hp' | 'mana' | 'stamina';
   value: number;
   reason: string;
@@ -132,5 +157,7 @@ export interface TurnResponse {
   inventoryUpdates: InventoryUpdate[];
   characterStatusUpdates?: CharacterStatusUpdate[];
   activeEnemies: Enemy[]; // Lista atualizada de inimigos na cena
-  mapData?: MapData; // Novo campo opcional para o mapa
+  activeAllies: Ally[];   // Novo: Lista de aliados controlados pelo GM
+  nearbyItems: Item[];    // Novo: Itens encontrados no chão/ambiente
+  mapData?: MapData; 
 }

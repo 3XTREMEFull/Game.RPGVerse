@@ -1,9 +1,9 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Character, NarrativeTurn, DiceType, RollResult, WorldData, TurnResponse, Enemy, MapData, StatusEffect } from '../types';
+import { Character, NarrativeTurn, DiceType, RollResult, WorldData, TurnResponse, Enemy, MapData, StatusEffect, Item, Ally, EquipmentSlot } from '../types';
 import { processTurn } from '../services/geminiService';
 import { Button } from './Button';
-import { Send, User, Sparkles, Activity, Dices, ChevronDown, Target, Trophy, Skull, Backpack, Heart, Flame, Droplets, Sword, ClipboardList, ScrollText, Map as MapIcon, Compass, ShieldCheck, Box, AlertCircle, Clock, Plus, XCircle, Zap } from 'lucide-react';
+import { User, Dices, ChevronDown, Target, Trophy, Skull, Backpack, Heart, Flame, Droplets, Sword, ClipboardList, ScrollText, Map as MapIcon, Compass, ShieldCheck, AlertCircle, Clock, Plus, XCircle, Shield, Hand, ArrowDownToLine, ArrowUpFromLine, Star, Trash, Shirt, Briefcase, Zap } from 'lucide-react';
 
 interface NarrativeViewProps {
   characters: Character[];
@@ -54,19 +54,19 @@ const StatusBadge: React.FC<{ status: StatusEffect, onRemove?: () => void }> = (
 );
 
 const MapPin = ({ symbol, label, type = 'poi' }: { symbol: string, label?: string, type?: 'poi' | 'actor' }) => (
-    <div className="relative flex flex-col items-center justify-end -mt-8 z-10 group">
-        <div className={`relative flex items-center justify-center w-8 h-10 transition-transform duration-200 hover:-translate-y-1 hover:scale-110`}>
-            <svg viewBox="0 0 24 24" className={`w-full h-full drop-shadow-md ${type === 'actor' ? 'text-red-900' : 'text-slate-900'}`} fill="currentColor">
-               <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
-            </svg>
-            <span className="absolute top-1.5 text-sm leading-none drop-shadow-sm select-none">{symbol}</span>
+    <div className="relative flex flex-col items-center justify-center z-10 group w-full h-full">
+        <div className={`relative flex items-center justify-center w-full h-full transition-transform duration-200 hover:scale-110`}>
+            {type === 'actor' ? (
+                 <span className="text-lg md:text-xl drop-shadow-md filter">{symbol}</span>
+            ) : (
+                 <span className="text-lg md:text-xl drop-shadow-sm">{symbol}</span>
+            )}
         </div>
         {label && (
-            <div className="absolute top-full mt-1 bg-slate-900 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-20 pointer-events-none border border-slate-700">
+            <div className="absolute bottom-full mb-1 bg-slate-900 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none border border-slate-700">
                 {label}
             </div>
         )}
-        <div className="w-4 h-1 bg-black/40 rounded-full blur-[1px] mt-[-2px]"></div>
     </div>
 );
 
@@ -79,13 +79,15 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
     initialMapData,
     onStateChange
 }) => {
-  const [activeCharacters, setActiveCharacters] = useState<Character[]>(initialCharacters.map(c => ({...c, status: c.status || []})));
+  const [activeCharacters, setActiveCharacters] = useState<Character[]>(initialCharacters.map(c => ({...c, status: c.status || [], equipment: c.equipment || {}})));
   const [history, setHistory] = useState<NarrativeTurn[]>(initialHistory);
   const [actions, setActions] = useState<Record<string, string>>({});
   const [selectedDice, setSelectedDice] = useState<Record<string, DiceType>>({});
   const [isProcessing, setIsProcessing] = useState(false);
   const [gameResult, setGameResult] = useState<'victory' | 'defeat' | null>(null);
   const [enemies, setEnemies] = useState<Enemy[]>(initialEnemies?.map(e => ({...e, status: e.status || []})) || []);
+  const [activeAllies, setActiveAllies] = useState<Ally[]>([]);
+  const [nearbyItems, setNearbyItems] = useState<Item[]>([]); // Itens no chão
   const [activeTab, setActiveTab] = useState<'combat' | 'map' | 'character' | 'inventory' | 'logs'>('combat');
   const [mechanicLogs, setMechanicLogs] = useState<MechanicLog[]>([]);
   const [mapData, setMapData] = useState<MapData | null>(initialMapData || null);
@@ -108,6 +110,10 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
 
   const addLog = (source: string, content: string, type: MechanicLog['type'], value?: number) => {
       setMechanicLogs(prev => [...prev, { id: crypto.randomUUID(), timestamp: Date.now(), source, content, type, value }]);
+  };
+
+  const clearLogs = () => {
+    setMechanicLogs([]);
   };
 
   const handleAddStatus = (targetId: string, type: 'enemy' | 'character', status: StatusEffect) => {
@@ -170,6 +176,139 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
     return result;
   };
 
+  // Inventory & Equipment Logic
+  const getInventoryLimit = (char: Character) => {
+      const baseLimit = 7;
+      const backpackBonus = char.equipment?.back?.capacityBonus || 0;
+      return baseLimit + backpackBonus;
+  };
+
+  const handleTakeItem = (charId: string, item: Item, itemIndex: number) => {
+    if (enemies.length > 0) return; // Bloqueado em combate
+
+    setActiveCharacters(prev => prev.map(c => {
+        if (c.id === charId) {
+            // Prevent duplicates in character inventory (simple check by name)
+            if (c.items.some(i => i.name === item.name)) {
+                addLog('Inventário', `${item.name} já está no inventário.`, 'system-info');
+                return c;
+            }
+            if (c.items.length >= getInventoryLimit(c)) return c; // Limite atingido
+            return { ...c, items: [...c.items, item] };
+        }
+        return c;
+    }));
+
+    setNearbyItems(prev => prev.filter((_, idx) => idx !== itemIndex));
+    addLog('Inventário', `Pegou ${item.name} do chão.`, 'gain');
+  };
+
+  const handleDropItem = (charId: string, item: Item, itemIndex: number) => {
+    if (enemies.length > 0) return; // Bloqueado em combate
+
+    setActiveCharacters(prev => prev.map(c => {
+        if (c.id === charId) {
+            return { ...c, items: c.items.filter((_, idx) => idx !== itemIndex) };
+        }
+        return c;
+    }));
+
+    setNearbyItems(prev => [...prev, item]);
+    addLog('Inventário', `Jogou ${item.name} no chão.`, 'system-info');
+  };
+
+  const handleUseItem = (charId: string, item: Item, itemIndex: number) => {
+      if (enemies.length > 0) {
+          addLog('Ação Bloqueada', 'Não é possível usar itens instantâneos em combate.', 'system-info');
+          return;
+      }
+
+      setActiveCharacters(prev => prev.map(c => {
+          if (c.id === charId) {
+              // Simple Regex to attempt to parse effects locally for instant feedback
+              // Looks for "Heals/Recovers X HP/Mana/Stamina" patterns
+              const hpMatch = item.effect.match(/(?:recupera|cura|ganha|\+)\s*(\d+)\s*(?:hp|vida)/i);
+              const manaMatch = item.effect.match(/(?:recupera|cura|ganha|\+)\s*(\d+)\s*(?:mana|mp)/i);
+              const stMatch = item.effect.match(/(?:recupera|cura|ganha|\+)\s*(\d+)\s*(?:stamina|estamina|st)/i);
+
+              let newDerived = { ...c.derived };
+              let effectApplied = false;
+
+              if (hpMatch) {
+                  const val = parseInt(hpMatch[1]);
+                  newDerived.hp += val; // Usually max HP logic would be here, but let's keep it simple or unbound for now
+                  addLog(c.name, `Recuperou ${val} HP com ${item.name}`, 'gain');
+                  effectApplied = true;
+              }
+              if (manaMatch) {
+                  const val = parseInt(manaMatch[1]);
+                  newDerived.mana += val;
+                  addLog(c.name, `Recuperou ${val} Mana com ${item.name}`, 'gain');
+                  effectApplied = true;
+              }
+              if (stMatch) {
+                  const val = parseInt(stMatch[1]);
+                  newDerived.stamina += val;
+                  addLog(c.name, `Recuperou ${val} Estamina com ${item.name}`, 'gain');
+                  effectApplied = true;
+              }
+
+              if (!effectApplied) {
+                  addLog(c.name, `Usou ${item.name}. (Efeito narrativo aplicado)`, 'system-info');
+              }
+
+              return { 
+                  ...c, 
+                  derived: newDerived,
+                  items: c.items.filter((_, idx) => idx !== itemIndex) 
+              };
+          }
+          return c;
+      }));
+  };
+
+  const handleEquipItem = (charId: string, item: Item, itemIndex: number) => {
+      if (enemies.length > 0) return; // Block in combat
+      if (!item.slot) return;
+
+      setActiveCharacters(prev => prev.map(c => {
+          if (c.id === charId) {
+              const currentEquipped = c.equipment?.[item.slot!];
+              if (currentEquipped) {
+                  addLog('Equipamento', `Slot ${item.slot} ocupado. Desequipe primeiro.`, 'system-info');
+                  return c;
+              }
+              const newEquipment = { ...c.equipment, [item.slot!]: item };
+              const newItems = c.items.filter((_, idx) => idx !== itemIndex);
+              return { ...c, equipment: newEquipment, items: newItems };
+          }
+          return c;
+      }));
+      addLog('Equipamento', `Equipou ${item.name}.`, 'gain');
+  };
+
+  const handleUnequipItem = (charId: string, slot: EquipmentSlot) => {
+      if (enemies.length > 0) return; // Block in combat
+
+      setActiveCharacters(prev => prev.map(c => {
+          if (c.id === charId) {
+              const item = c.equipment?.[slot];
+              if (!item) return c;
+              
+              if (c.items.length >= getInventoryLimit(c)) {
+                  addLog('Equipamento', `Sem espaço na mochila para desequipar.`, 'system-info');
+                  return c;
+              }
+
+              const newEquipment = { ...c.equipment };
+              delete newEquipment[slot];
+              return { ...c, equipment: newEquipment, items: [...c.items, item] };
+          }
+          return c;
+      }));
+      addLog('Equipamento', `Desequipou item das ${slot}.`, 'system-info');
+  };
+
   const submitTurn = async () => {
     if (!worldData) return;
     const turnPlayerRolls: Record<string, RollResult> = {};
@@ -189,8 +328,10 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
     setActions({});
     setIsProcessing(true);
     try {
-      const response: TurnResponse = await processTurn(history, activeCharacters.map(c => ({name: c.name, action: actions[c.id] || ""})), activeCharacters, turnPlayerRolls, worldData, enemies, turnEnemyRolls);
+      const response: TurnResponse = await processTurn(history, activeCharacters.map(c => ({name: c.name, action: actions[c.id] || ""})), activeCharacters, turnPlayerRolls, worldData, enemies, activeAllies, turnEnemyRolls);
       let updatedCharacters = [...activeCharacters];
+      
+      // Resource Changes
       if (response.resourceChanges) {
         response.resourceChanges.forEach(change => {
           const charIndex = updatedCharacters.findIndex(c => c.name === change.characterName);
@@ -198,17 +339,26 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
               const res = change.resource;
               updatedCharacters[charIndex] = { ...updatedCharacters[charIndex], derived: { ...updatedCharacters[charIndex].derived, [res]: Math.max(0, updatedCharacters[charIndex].derived[res] + change.value) } };
               addLog('Sistema', `${change.characterName}: ${res.toUpperCase()} ${change.value > 0 ? '+' : ''}${change.value}`, change.value < 0 ? 'damage' : 'gain');
+          } else {
+             // Log apenas para inimigos/aliados
+             addLog('Sistema', `${change.characterName}: ${change.resource.toUpperCase()} ${change.value > 0 ? '+' : ''}${change.value}`, change.value < 0 ? 'damage' : 'gain');
           }
         });
       }
+
+      // Inventory Updates (Fix Duplication)
       if (response.inventoryUpdates) {
         response.inventoryUpdates.forEach(update => {
           const charIndex = updatedCharacters.findIndex(c => c.name === update.characterName);
           if (charIndex !== -1) {
               const char = updatedCharacters[charIndex];
               if (update.action === 'ADD') {
-                  char.items = [...char.items, update.item];
-                  addLog('Loot', `${char.name} obteve ${update.item.name}`, 'gain');
+                  // DUPLICATION FIX: Check if item exists in nearby items before adding
+                  setNearbyItems(prev => {
+                      if (prev.some(i => i.name === update.item.name)) return prev;
+                      addLog('Loot', `${update.item.name} caiu no chão/encontrado.`, 'system-info');
+                      return [...prev, update.item];
+                  });
               } else if (update.action === 'REMOVE') {
                   char.items = char.items.filter(i => i.name !== update.item.name);
                   addLog('Perda', `${char.name} perdeu ${update.item.name}`, 'damage');
@@ -216,6 +366,19 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
           }
         });
       }
+
+      // New Nearby Items from AI (Fix Duplication)
+      if (response.nearbyItems && response.nearbyItems.length > 0) {
+          setNearbyItems(prev => {
+              const newItems = response.nearbyItems.filter(newItem => !prev.some(existing => existing.name === newItem.name));
+              if (newItems.length > 0) {
+                  addLog('Ambiente', `${newItems.length} novos itens no local.`, 'system-info');
+                  return [...prev, ...newItems];
+              }
+              return prev;
+          });
+      }
+
       if (response.characterStatusUpdates) {
           response.characterStatusUpdates.forEach(update => {
               const charIndex = updatedCharacters.findIndex(c => c.name === update.characterName);
@@ -224,11 +387,15 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
       }
       setActiveCharacters(updatedCharacters);
       
-      // Update Enemies and Music State
+      // Update Enemies, Allies and Map
       if (response.activeEnemies) {
           setEnemies(response.activeEnemies.map(e => ({...e, status: e.status || []})));
       }
+      if (response.activeAllies) {
+          setActiveAllies(response.activeAllies.map(a => ({...a, status: a.status || []})));
+      }
       if (response.mapData) setMapData(response.mapData);
+      
       setHistory(prev => [...prev, { role: 'gm', content: response.storyText, timestamp: Date.now() + 100 }]);
       
       const newGameResult = response.isGameOver && response.gameResult ? (response.gameResult === 'VICTORY' ? 'victory' : 'defeat') : null;
@@ -246,8 +413,6 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
   };
 
   const getHpPercent = (curr: number, max: number) => Math.min(100, Math.max(0, (curr / max) * 100));
-  const hasBackpack = (char: Character) => char.items.some(i => i.name.toLowerCase().includes('mochila'));
-  const getInventoryLimit = (char: Character) => hasBackpack(char) ? 10 : 5;
 
   if (gameResult) {
     return (
@@ -320,49 +485,87 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
         <div className="p-4 space-y-6 flex-1 overflow-y-auto bg-slate-900/30">
             {activeTab === 'combat' && (
                 <div className="space-y-4 animate-fade-in">
-                    <h4 className="text-xs text-slate-400 font-bold uppercase mb-3">Inimigos Ativos</h4>
-                    {enemies.length === 0 ? <div className="text-center py-4 border border-dashed border-slate-800 rounded text-slate-600 text-xs italic">Cena tranquila...</div> : (
-                        enemies.map((enemy, idx) => (
-                            <div key={idx} className="bg-slate-950 border border-slate-800 rounded p-2 space-y-2 relative">
-                                <div className="flex justify-between items-center mb-1">
-                                    <span className="text-xs font-bold text-slate-200">{enemy.name}</span>
-                                    <span className={`text-[8px] px-1.5 rounded uppercase font-bold text-slate-900 ${enemy.difficulty === 'Boss' ? 'bg-amber-500' : 'bg-slate-400'}`}>{enemy.difficulty}</span>
-                                </div>
-                                <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden relative"><div className={`h-full transition-all duration-500 ${getHpPercent(enemy.currentHp, enemy.maxHp) < 30 ? 'bg-red-500' : 'bg-green-500'}`} style={{ width: `${getHpPercent(enemy.currentHp, enemy.maxHp)}%` }}/></div>
-                                <div className="flex flex-wrap items-center gap-1 mt-1 min-h-[20px]">
-                                    {enemy.status?.map((st, i) => (
-                                        <StatusBadge 
-                                            key={i} 
-                                            status={st} 
-                                            onRemove={() => handleRemoveStatus(enemy.id, 'enemy', i)} 
-                                        />
-                                    ))}
-                                    <div className="relative">
-                                        <button 
-                                            onClick={() => setAddingStatusTo(addingStatusTo?.id === enemy.id ? null : {id: enemy.id, type: 'enemy'})}
-                                            className="text-slate-500 hover:text-amber-500 transition-colors bg-slate-900 border border-slate-700 rounded-full p-0.5"
-                                            title="Adicionar Status"
-                                        >
-                                            <Plus size={10} />
-                                        </button>
-                                        {addingStatusTo?.id === enemy.id && addingStatusTo.type === 'enemy' && (
-                                            <div className="absolute top-full left-0 mt-1 w-40 bg-slate-900 border border-slate-700 rounded shadow-xl z-50 animate-fade-in max-h-48 overflow-y-auto">
-                                                {AVAILABLE_STATUSES.map(st => (
-                                                    <button 
-                                                        key={st.name} 
-                                                        className="w-full text-left px-2 py-1.5 text-[9px] hover:bg-slate-800 text-slate-300 hover:text-white border-b border-slate-800 last:border-0"
-                                                        onClick={() => handleAddStatus(enemy.id, 'enemy', st)}
-                                                    >
-                                                        {st.name}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        )}
+                    {/* SEÇÃO DE INIMIGOS */}
+                    <div className="space-y-3">
+                        <h4 className="text-xs text-red-400 font-bold uppercase mb-1">Inimigos Ativos</h4>
+                        {enemies.length === 0 ? <div className="text-center py-4 border border-dashed border-slate-800 rounded text-slate-600 text-xs italic">Nenhum inimigo à vista...</div> : (
+                            enemies.map((enemy, idx) => (
+                                <div key={idx} className="bg-slate-950 border border-slate-800 rounded p-2 space-y-2 relative">
+                                    <div className="flex justify-between items-center mb-1">
+                                        <span className="text-xs font-bold text-slate-200">{enemy.name}</span>
+                                        <span className={`text-[8px] px-1.5 rounded uppercase font-bold text-slate-900 ${enemy.difficulty === 'Boss' ? 'bg-amber-500' : 'bg-slate-400'}`}>{enemy.difficulty}</span>
+                                    </div>
+                                    <div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden relative border border-slate-700">
+                                        <div className={`h-full transition-all duration-500 ${getHpPercent(enemy.currentHp, enemy.maxHp) < 30 ? 'bg-red-500' : 'bg-green-600'}`} style={{ width: `${getHpPercent(enemy.currentHp, enemy.maxHp)}%` }}/>
+                                        <div className="absolute inset-0 flex items-center justify-center text-[9px] font-bold text-white drop-shadow-md z-10 leading-none pb-[1px]">
+                                            {enemy.currentHp} / {enemy.maxHp} HP
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-1 mt-1">
+                                        <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden flex-1 relative border border-slate-700/50" title="Mana">
+                                            <div className="h-full bg-blue-500 transition-all duration-500" style={{ width: `${getHpPercent(enemy.currentMana || 0, enemy.maxMana || 1)}%` }}/>
+                                        </div>
+                                        <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden flex-1 relative border border-slate-700/50" title="Stamina">
+                                            <div className="h-full bg-amber-500 transition-all duration-500" style={{ width: `${getHpPercent(enemy.currentStamina || 0, enemy.maxStamina || 1)}%` }}/>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex flex-wrap items-center gap-1 mt-2 min-h-[20px]">
+                                        {enemy.status?.map((st, i) => (
+                                            <StatusBadge 
+                                                key={i} 
+                                                status={st} 
+                                                onRemove={() => handleRemoveStatus(enemy.id, 'enemy', i)} 
+                                            />
+                                        ))}
+                                        <div className="relative">
+                                            <button 
+                                                onClick={() => setAddingStatusTo(addingStatusTo?.id === enemy.id ? null : {id: enemy.id, type: 'enemy'})}
+                                                className="text-slate-500 hover:text-amber-500 transition-colors bg-slate-900 border border-slate-700 rounded-full p-0.5"
+                                                title="Adicionar Status"
+                                            >
+                                                <Plus size={10} />
+                                            </button>
+                                            {addingStatusTo?.id === enemy.id && addingStatusTo.type === 'enemy' && (
+                                                <div className="absolute top-full left-0 mt-1 w-40 bg-slate-900 border border-slate-700 rounded shadow-xl z-50 animate-fade-in max-h-48 overflow-y-auto">
+                                                    {AVAILABLE_STATUSES.map(st => (
+                                                        <button 
+                                                            key={st.name} 
+                                                            className="w-full text-left px-2 py-1.5 text-[9px] hover:bg-slate-800 text-slate-300 hover:text-white border-b border-slate-800 last:border-0"
+                                                            onClick={() => handleAddStatus(enemy.id, 'enemy', st)}
+                                                        >
+                                                            {st.name}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                        ))
-                    )}
+                            ))
+                        )}
+                    </div>
+
+                    {/* SEÇÃO DE ALIADOS */}
+                    <div className="space-y-3 pt-4 border-t border-slate-800">
+                        <h4 className="text-xs text-blue-400 font-bold uppercase mb-1 flex items-center gap-1"><Shield size={10} /> Aliados (IA)</h4>
+                        {activeAllies.length === 0 ? <div className="text-center py-2 text-slate-600 text-[10px] italic">Sem aliados no momento.</div> : (
+                            activeAllies.map((ally, idx) => (
+                                <div key={idx} className="bg-slate-900/50 border border-blue-900/30 rounded p-2 space-y-2 relative">
+                                    <div className="flex justify-between items-center mb-1">
+                                        <span className="text-xs font-bold text-blue-200">{ally.name}</span>
+                                        <span className="text-[8px] bg-blue-900/50 text-blue-300 px-1.5 rounded uppercase font-bold">Aliado</span>
+                                    </div>
+                                    <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden relative">
+                                        <div className="h-full bg-blue-500 transition-all duration-500" style={{ width: `${getHpPercent(ally.currentHp, ally.maxHp)}%` }}/>
+                                    </div>
+                                    <div className="flex flex-wrap gap-1 mt-1">
+                                         {ally.status?.map((st, i) => <StatusBadge key={i} status={st} />)}
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
                 </div>
             )}
             {activeTab === 'character' && (
@@ -407,30 +610,153 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                                     )}
                                 </div>
                             </div>
+                            
+                            {/* NEW SKILL HUD */}
+                            <div className="mt-2 pt-2 border-t border-slate-800/50">
+                                <span className="text-[9px] font-bold text-slate-500 uppercase flex items-center gap-1 mb-2"><Star size={8}/> Habilidades</span>
+                                <div className="grid grid-cols-2 gap-2">
+                                    {char.skills.map((skill, idx) => (
+                                        <div key={idx} className="bg-slate-900 p-2 rounded border border-slate-800 flex flex-col group/skill">
+                                            <div className="flex justify-between items-center mb-1">
+                                                <span className="font-bold text-[10px] text-slate-200 truncate pr-1">{skill.name}</span>
+                                                <span className={`text-[8px] px-1 rounded ${skill.type === 'active' ? 'bg-red-900/40 text-red-300' : 'bg-blue-900/40 text-blue-300'}`}>{skill.type === 'active' ? 'ATV' : 'PAS'}</span>
+                                            </div>
+                                            <div className="text-[8px] text-slate-500 leading-tight line-clamp-2 group-hover/skill:line-clamp-none transition-all">{skill.description}</div>
+                                            <div className="text-[8px] text-slate-600 font-mono mt-1 text-right">Nv.{skill.level}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
                         </div>
                     ))}
                 </div>
             )}
             {activeTab === 'inventory' && (
-                <div className="animate-fade-in space-y-6">
-                    <h4 className="text-xs text-amber-500 font-bold uppercase mb-3 flex items-center gap-2"><Backpack size={14}/> Inventário</h4>
-                    {activeCharacters.map(char => (
-                        <div key={char.id} className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-2">
-                            <div className="flex justify-between items-center border-b border-slate-800 pb-1">
-                                <h5 className="font-cinzel text-amber-100 text-[10px] font-bold">{char.name}</h5>
-                                <span className={`text-[10px] font-bold ${char.items.length >= getInventoryLimit(char) ? 'text-red-500' : 'text-slate-500'}`}>{char.items.length}/{getInventoryLimit(char)}</span>
-                            </div>
+                <div className="animate-fade-in space-y-6 flex flex-col h-full">
+                    {/* Nearby Items / Ground */}
+                    <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-800 mb-2 max-h-[180px] overflow-y-auto">
+                        <h4 className="text-xs text-amber-500 font-bold uppercase mb-2 flex items-center gap-2 sticky top-0 bg-slate-900/90 py-1 z-10 backdrop-blur-sm">
+                            <ArrowDownToLine size={14}/> No Chão / Proximidades
+                        </h4>
+                        {nearbyItems.length === 0 ? (
+                            <div className="text-[10px] text-slate-600 italic text-center py-2">Nada por aqui...</div>
+                        ) : (
                             <div className="space-y-1">
-                                {char.items.map((item, i) => (
-                                    <div key={i} className="bg-slate-900/50 p-1 rounded text-[9px] flex flex-col">
-                                        <span className="font-bold text-slate-200">{item.name}</span>
-                                        <span className="text-amber-500/70">{item.effect}</span>
+                                {nearbyItems.map((item, idx) => (
+                                    <div key={idx} className="bg-slate-950 p-2 rounded flex justify-between items-center border border-slate-800">
+                                        <div className="flex flex-col">
+                                            <span className="text-[10px] font-bold text-slate-300">{item.name}</span>
+                                            <span className="text-[8px] text-slate-500">{item.effect}</span>
+                                        </div>
+                                        <div className="flex gap-1">
+                                            {activeCharacters.map(char => (
+                                                <button 
+                                                    key={char.id}
+                                                    onClick={(e) => { e.stopPropagation(); handleTakeItem(char.id, item, idx); }}
+                                                    disabled={enemies.length > 0 || char.items.length >= getInventoryLimit(char)}
+                                                    className="p-1 bg-green-900/30 hover:bg-green-700 text-green-300 rounded border border-green-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                                                    title={`Pegar para ${char.name} ${enemies.length > 0 ? '(Bloqueado em Combate)' : char.items.length >= getInventoryLimit(char) ? '(Mochila Cheia)' : ''}`}
+                                                >
+                                                    <Hand size={10} /> <span className="text-[8px] uppercase font-bold">{char.name.substring(0,3)}</span>
+                                                </button>
+                                            ))}
+                                        </div>
                                     </div>
                                 ))}
-                                {char.items.length === 0 && <span className="text-[9px] text-slate-700 italic">Vazio...</span>}
                             </div>
-                        </div>
-                    ))}
+                        )}
+                    </div>
+
+                    <div className="h-px bg-slate-800 my-2"></div>
+
+                    {/* Character Inventories */}
+                    <div className="space-y-4 overflow-y-auto flex-1">
+                        <h4 className="text-xs text-amber-500 font-bold uppercase mb-1 flex items-center gap-2"><Backpack size={14}/> Inventários & Equipamentos</h4>
+                        {activeCharacters.map(char => (
+                            <div key={char.id} className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-2">
+                                <div className="flex justify-between items-center border-b border-slate-800 pb-1">
+                                    <h5 className="font-cinzel text-amber-100 text-[10px] font-bold">{char.name}</h5>
+                                    <span className={`text-[10px] font-bold ${char.items.length >= getInventoryLimit(char) ? 'text-red-500' : 'text-slate-500'}`}>{char.items.length}/{getInventoryLimit(char)}</span>
+                                </div>
+                                
+                                {/* EQUIPMENT SLOTS */}
+                                <div className="grid grid-cols-3 gap-2 mb-2">
+                                    {(['back', 'chest', 'legs'] as EquipmentSlot[]).map(slot => {
+                                        const equippedItem = char.equipment?.[slot];
+                                        return (
+                                            <div key={slot} className="bg-slate-900 p-1.5 rounded border border-slate-700 flex flex-col items-center justify-center text-center relative group/slot">
+                                                <span className="text-[8px] text-slate-500 font-bold uppercase mb-1">
+                                                    {slot === 'back' && <Backpack size={10} />}
+                                                    {slot === 'chest' && <Shirt size={10} />}
+                                                    {slot === 'legs' && <Briefcase size={10} />}
+                                                </span>
+                                                {equippedItem ? (
+                                                    <div className="w-full">
+                                                        <div className="text-[9px] font-bold text-amber-500 truncate">{equippedItem.name}</div>
+                                                        <button 
+                                                            onClick={(e) => { e.stopPropagation(); handleUnequipItem(char.id, slot); }}
+                                                            disabled={enemies.length > 0}
+                                                            className="absolute inset-0 bg-red-900/90 text-white opacity-0 group-hover/slot:opacity-100 flex items-center justify-center text-[9px] font-bold transition-opacity disabled:cursor-not-allowed disabled:bg-slate-800 disabled:opacity-50"
+                                                        >
+                                                            Desequipar
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-[8px] text-slate-700 italic">Vazio</span>
+                                                )}
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+
+                                <div className="space-y-1">
+                                    {char.items.map((item, i) => (
+                                        <div key={i} className="bg-slate-900/50 p-1 rounded text-[9px] flex justify-between items-center group">
+                                            <div className="flex flex-col">
+                                                <div className="flex items-center gap-1">
+                                                    <span className="font-bold text-slate-200">{item.name}</span>
+                                                    {item.slot && <span className="text-[7px] px-1 bg-slate-700 text-slate-300 rounded uppercase">{item.slot}</span>}
+                                                    {item.type === 'consumable' && <span className="text-[7px] px-1 bg-green-900/50 text-green-300 rounded uppercase border border-green-800">Consumível</span>}
+                                                </div>
+                                                <span className="text-amber-500/70">{item.effect}</span>
+                                            </div>
+                                            <div className="flex gap-1">
+                                                {item.type === 'consumable' && (
+                                                    <button 
+                                                        onClick={(e) => { e.stopPropagation(); handleUseItem(char.id, item, i); }}
+                                                        disabled={enemies.length > 0}
+                                                        className="p-1 text-slate-500 hover:text-amber-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                                        title={enemies.length > 0 ? "Bloqueado em Combate" : "Usar Item"}
+                                                    >
+                                                        <Zap size={10} />
+                                                    </button>
+                                                )}
+                                                {item.slot && !char.equipment?.[item.slot] && (
+                                                    <button 
+                                                        onClick={(e) => { e.stopPropagation(); handleEquipItem(char.id, item, i); }}
+                                                        disabled={enemies.length > 0}
+                                                        className="p-1 text-slate-500 hover:text-blue-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                                        title={enemies.length > 0 ? "Bloqueado em Combate" : "Equipar"}
+                                                    >
+                                                        <ShieldCheck size={10} />
+                                                    </button>
+                                                )}
+                                                <button 
+                                                    onClick={(e) => { e.stopPropagation(); handleDropItem(char.id, item, i); }}
+                                                    disabled={enemies.length > 0}
+                                                    className="p-1 text-slate-500 hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                                    title={enemies.length > 0 ? "Bloqueado em Combate" : "Jogar no Chão"}
+                                                >
+                                                    <ArrowUpFromLine size={10} />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {char.items.length === 0 && <span className="text-[9px] text-slate-700 italic">Mochila vazia...</span>}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
                 </div>
             )}
             {activeTab === 'map' && mapData && (
@@ -440,7 +766,7 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                     <div className="relative aspect-square w-full bg-[#e2d1b3] overflow-hidden rounded shadow-2xl border-4 border-amber-900/40">
                         <div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/handmade-paper.png')]"></div>
                         <div className="absolute inset-0 grid grid-cols-5 grid-rows-5 p-4 z-0">
-                            {mapData.grid.map((row, rIdx) => (row.map((cell, cIdx) => (
+                            {mapData.grid?.map((row, rIdx) => (row?.map((cell, cIdx) => (
                                 <div key={`${rIdx}-${cIdx}`} className="flex items-center justify-center relative border-[0.2px] border-black/5">
                                     {cell === '.' ? <div className="text-[8px] text-black/10 font-bold">+</div> : <MapPin symbol={cell} label={mapData.legend.find(l => l.symbol === cell)?.description} type={['👹', '👤'].some(e => cell.includes(e)) ? 'actor' : 'poi'} />}
                                 </div>
@@ -450,8 +776,13 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                 </div>
             )}
             {activeTab === 'logs' && (
-                <div className="h-full flex flex-col animate-fade-in space-y-2">
-                    <h4 className="text-xs text-purple-400 font-bold uppercase mb-3 flex items-center gap-2"><Dices size={12} /> Log de Batalha</h4>
+                <div className="h-full flex flex-col animate-fade-in space-y-2 relative">
+                    <div className="flex items-center justify-between mb-2">
+                        <h4 className="text-xs text-purple-400 font-bold uppercase flex items-center gap-2"><Dices size={12} /> Log de Batalha</h4>
+                        <button onClick={clearLogs} className="text-[10px] text-slate-500 hover:text-red-400 flex items-center gap-1 border border-slate-700 px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 transition-colors">
+                            <Trash size={10} /> Limpar
+                        </button>
+                    </div>
                     {mechanicLogs.map((log) => (
                         <div key={log.id} className="bg-slate-950/80 p-2 rounded border border-slate-800 text-[10px] space-y-1">
                             <div className="flex justify-between font-bold"><span className={log.type === 'player-roll' ? 'text-blue-300' : 'text-red-300'}>{log.source}</span><span>{log.value}</span></div>

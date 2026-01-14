@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { WorldData, Character, Skill, Attributes, DerivedStats, Item } from '../types';
 import { generateCharacterDetails } from '../services/geminiService';
@@ -80,7 +81,8 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({ world, onC
       skills: selectedSkills,
       attributes: generatedAttributes,
       derived: generatedDerived,
-      items: generatedItems
+      items: generatedItems,
+      equipment: {} // Initialize equipment
     };
 
     setCharacters([...characters, newChar]);

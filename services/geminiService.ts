@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type, Schema } from "@google/genai";
-import { WorldData, Character, NarrativeTurn, Skill, Attributes, RollResult, TurnResponse, DerivedStats, ResourceChange, Item, Enemy, MapData, StatusEffect, CharacterStatusUpdate } from "../types";
+import { WorldData, Character, NarrativeTurn, Skill, Attributes, RollResult, TurnResponse, DerivedStats, ResourceChange, Item, Enemy, MapData, StatusEffect, CharacterStatusUpdate, Ally } from "../types";
 
 const API_KEY = process.env.API_KEY || '';
 
@@ -75,31 +75,45 @@ AVALIAÇÃO DE DIFICULDADE (DC):
 FÓRMULA DE TESTE:
 - 1d20 + Modificador + Habilidade >= DC Escolhida.
 
-COMBATE & INIMIGOS:
+COMBATE, INIMIGOS E ALIADOS:
 - Defina HP baseado na dificuldade (Minion: 10-20, Elite: 40-80, Boss: 150+).
+- **RECURSOS DE NPCs**: Todo inimigo E ALIADO deve ter Mana e Estamina.
+  - Minion/Normal: ~10 Mana / ~10 Estamina.
+  - Elite: ~30 Mana / ~30 Estamina.
+  - Boss: ~100 Mana / ~100 Estamina.
 - Ataques e Dano baseados nos atributos (FOR/DES para físico, INT/SAB para mágico).
 - **USO OBRIGATÓRIO DE DADOS DE INIMIGOS**: O prompt fornecerá as rolagens D20 para cada inimigo. USE esses valores para determinar se eles acertam ou erram os jogadores.
-   - D20 alto (15+) = Provável acerto/crítico.
-   - D20 baixo (1-8) = Erro/Falha.
+- **SISTEMA DE ALIADOS**:
+  - Se um jogador tentar persuadir ou recrutar um NPC/Inimigo e obtiver SUCESSO no teste (DC baseada na situação):
+    1. Remova-o da lista 'activeEnemies'.
+    2. Adicione-o na lista 'activeAllies'.
+  - Você (IA) controla os Aliados em combate. Narre as ações deles ajudando o grupo.
 
 RECURSOS & MATEMÁTICA (CRÍTICO):
 - Vida (hp), Estamina (stamina), Mana (mana).
 - **REGRA DE SINAL**: Para DANO ou CUSTO, você DEVE usar valores **NEGATIVOS** (ex: -10 HP, -5 Mana). Para CURA ou RECUPERAÇÃO, use valores POSITIVOS (ex: +5 HP).
+- **LOG DE BATALHA**: Ao causar dano em um INIMIGO ou ALIADO, adicione uma entrada em 'resourceChanges'.
 
-LOOT & RECOMPENSAS (AUTOMÁTICO):
-- Se um inimigo morrer (HP <= 0), GERE loot para quem deu o golpe final usando 'inventoryUpdates' -> 'ADD'.
-- Se jogadores investigarem objetos/baús com sucesso, gere itens úteis.
+LOOT & ITENS E EQUIPAMENTOS (ATUALIZADO):
+- Se um inimigo morrer ou jogadores investigarem com sucesso:
+- **NÃO force o item no inventário**. USE 'nearbyItems': Coloque os itens encontrados nesta lista.
+- **CLASSIFICAÇÃO DE ITENS**:
+  - Use o campo 'type' para definir o tipo de item: 'consumable' (poções, comida), 'equipment' (armas, roupas) ou 'misc' (chaves, tesouros).
+- **SLOTS DE EQUIPAMENTO**: Itens podem ter um 'slot' específico.
+  - 'back': Mochilas (Aumentam capacidade do inventário. Ex: Mochila Escolar (+5), Mochila Militar (+10)).
+  - 'chest': Coletes, Armaduras, Roupas.
+  - 'legs': Coldres, Bolsas de perna, Calças táticas.
+- Defina 'slot' e 'capacityBonus' (para mochilas) no objeto Item quando gerar loot.
 
 MAPA & NAVEGAÇÃO (VISUAL):
 - O mapa é uma grade 5x5 representando a REGIÃO IMEDIATA.
 - **ESTRUTURA DO MAPA**:
   - Use '.' para terreno vazio/estrada.
   - Use Emojis ÚNICOS para LOCAIS IMPORTANTES criados na história (ex: 🏰 Castelo, 🛖 Cabana, 🌲 Floresta Encantada).
-  - Use Emojis para Personagens (👤) e Inimigos (👹).
+  - Use Emojis para Personagens (👤), Inimigos (👹) e Aliados (🛡️).
   - O "Centro" (2,2) geralmente é onde a ação ocorre.
 - **LEGENDA**:
-  - A legenda DEVE listar o significado de cada emoji usado no grid (exceto o ponto '.').
-  - Crie nomes evocativos para os locais (Ex: "Ruínas de Eldoria" em vez de apenas "Ruínas").
+  - A legenda DEVE listar o significado de cada emoji usado no grid.
 `;
 
 const MODEL_NAME = "gemini-3-flash-preview";
@@ -176,9 +190,12 @@ export const generateCharacterDetails = async (world: WorldData, characterConcep
           properties: {
             name: { type: Type.STRING },
             description: { type: Type.STRING },
-            effect: { type: Type.STRING }
+            effect: { type: Type.STRING },
+            type: { type: Type.STRING, enum: ['consumable', 'equipment', 'misc'] },
+            slot: { type: Type.STRING, enum: ['back', 'chest', 'legs'], description: "Optional equipment slot." },
+            capacityBonus: { type: Type.INTEGER, description: "Only for 'back' items (backpacks)." }
           },
-          required: ["name", "description", "effect"]
+          required: ["name", "description", "effect", "type"]
         }
       }
     },
@@ -190,6 +207,8 @@ export const generateCharacterDetails = async (world: WorldData, characterConcep
   Conceito do Personagem: ${characterConcept}
   
   Gere atributos equilibrados (1-5), 4 habilidades temáticas e 3 itens iniciais.
+  Se o personagem tiver uma mochila, defina slot='back' e capacityBonus.
+  Se o item for poção ou comida, defina type='consumable'.
   `;
 
   return callWithRetry(async () => {
@@ -234,9 +253,13 @@ export const startNarrative = async (world: WorldData, characters: Character[]):
                     description: { type: Type.STRING },
                     currentHp: { type: Type.INTEGER },
                     maxHp: { type: Type.INTEGER },
+                    currentMana: { type: Type.INTEGER },
+                    maxMana: { type: Type.INTEGER },
+                    currentStamina: { type: Type.INTEGER },
+                    maxStamina: { type: Type.INTEGER },
                     difficulty: { type: Type.STRING, enum: ["Minion", "Elite", "Boss"] }
                 },
-                required: ["id", "name", "description", "currentHp", "maxHp", "difficulty"]
+                required: ["id", "name", "description", "currentHp", "maxHp", "currentMana", "maxMana", "currentStamina", "maxStamina", "difficulty"]
             }
         },
         mapData: {
@@ -304,6 +327,7 @@ export const processTurn = async (
   rolls: Record<string, RollResult>,
   world: WorldData,
   currentEnemies: Enemy[],
+  currentAllies: Ally[] = [],
   enemyRolls: Record<string, RollResult> = {}
 ): Promise<TurnResponse> => {
   const context = history.map(h => {
@@ -317,16 +341,23 @@ export const processTurn = async (
     if (!char || !roll) return `Ação: ${p.action}`;
     const stats = JSON.stringify(char.attributes);
     const derived = JSON.stringify(char.derived);
-    return `PERSONAGEM: ${p.name}, AÇÃO: "${p.action}", DADO: ${roll.type}(${roll.value}), STATS: ${stats}, RECURSOS: ${derived}`;
+    // Include equipped items in context
+    const equipment = char.equipment ? `Equipado: ${JSON.stringify(char.equipment)}` : "";
+    return `PERSONAGEM: ${p.name}, AÇÃO: "${p.action}", DADO: ${roll.type}(${roll.value}), STATS: ${stats}, RECURSOS: ${derived}, ${equipment}`;
   }).join('\n');
 
   const enemyContext = currentEnemies.length > 0 
     ? `INIMIGOS ATIVOS E SUAS ROLAGENS (D20) PARA ESTA RODADA:
        ${currentEnemies.map(e => {
            const roll = enemyRolls[e.id];
-           return `- ${e.name} (${e.difficulty}, HP:${e.currentHp}): ROLAGEM D20 = ${roll ? roll.value : 'N/A'}`;
+           return `- ${e.name} (${e.difficulty}, HP:${e.currentHp}, MP:${e.currentMana}, ST:${e.currentStamina}): ROLAGEM D20 = ${roll ? roll.value : 'N/A'}`;
        }).join('\n')}`
     : "NENHUM INIMIGO ATIVO.";
+
+  const allyContext = currentAllies.length > 0
+    ? `ALIADOS ATIVOS (CONTROLE ELES):
+       ${currentAllies.map(a => `- ${a.name} (HP: ${a.currentHp}, MP: ${a.currentMana})`).join('\n')}`
+    : "NENHUM ALIADO ATIVO.";
 
   const schema: Schema = {
     type: Type.OBJECT,
@@ -394,9 +425,12 @@ export const processTurn = async (
                 properties: {
                     name: { type: Type.STRING },
                     description: { type: Type.STRING },
-                    effect: { type: Type.STRING }
+                    effect: { type: Type.STRING },
+                    type: { type: Type.STRING, enum: ['consumable', 'equipment', 'misc'] },
+                    slot: { type: Type.STRING, enum: ['back', 'chest', 'legs'] },
+                    capacityBonus: { type: Type.INTEGER }
                 },
-                required: ["name", "description", "effect"]
+                required: ["name", "description", "effect", "type"]
             }
           },
           required: ["characterName", "action", "item"]
@@ -412,6 +446,10 @@ export const processTurn = async (
                 description: { type: Type.STRING },
                 currentHp: { type: Type.INTEGER },
                 maxHp: { type: Type.INTEGER },
+                currentMana: { type: Type.INTEGER },
+                maxMana: { type: Type.INTEGER },
+                currentStamina: { type: Type.INTEGER },
+                maxStamina: { type: Type.INTEGER },
                 difficulty: { type: Type.STRING, enum: ["Minion", "Elite", "Boss"] },
                 status: {
                     type: Type.ARRAY,
@@ -426,7 +464,52 @@ export const processTurn = async (
                     }
                 }
             },
-            required: ["id", "name", "description", "currentHp", "maxHp", "difficulty"]
+            required: ["id", "name", "description", "currentHp", "maxHp", "currentMana", "maxMana", "currentStamina", "maxStamina", "difficulty"]
+        }
+      },
+      activeAllies: {
+        type: Type.ARRAY,
+        items: {
+            type: Type.OBJECT,
+            properties: {
+                id: { type: Type.STRING },
+                name: { type: Type.STRING },
+                description: { type: Type.STRING },
+                currentHp: { type: Type.INTEGER },
+                maxHp: { type: Type.INTEGER },
+                currentMana: { type: Type.INTEGER },
+                maxMana: { type: Type.INTEGER },
+                currentStamina: { type: Type.INTEGER },
+                maxStamina: { type: Type.INTEGER },
+                status: {
+                    type: Type.ARRAY,
+                    items: {
+                        type: Type.OBJECT,
+                        properties: {
+                            name: { type: Type.STRING },
+                            description: { type: Type.STRING },
+                            duration: { type: Type.INTEGER }
+                        },
+                        required: ["name", "description", "duration"]
+                    }
+                }
+            },
+            required: ["id", "name", "description", "currentHp", "maxHp", "currentMana", "maxMana", "currentStamina", "maxStamina"]
+        }
+      },
+      nearbyItems: {
+        type: Type.ARRAY,
+        items: {
+            type: Type.OBJECT,
+            properties: {
+                name: { type: Type.STRING },
+                description: { type: Type.STRING },
+                effect: { type: Type.STRING },
+                type: { type: Type.STRING, enum: ['consumable', 'equipment', 'misc'] },
+                slot: { type: Type.STRING, enum: ['back', 'chest', 'legs'] },
+                capacityBonus: { type: Type.INTEGER }
+            },
+            required: ["name", "description", "effect", "type"]
         }
       },
       mapData: {
@@ -456,7 +539,7 @@ export const processTurn = async (
         required: ["locationName", "grid", "legend"]
       }
     },
-    required: ["storyText", "isGameOver", "attributeChanges", "resourceChanges", "inventoryUpdates", "activeEnemies", "mapData"]
+    required: ["storyText", "isGameOver", "attributeChanges", "resourceChanges", "inventoryUpdates", "activeEnemies", "activeAllies", "nearbyItems", "mapData"]
   };
 
   const prompt = `
@@ -469,17 +552,20 @@ export const processTurn = async (
   CONTEXTO DE COMBATE E ROLAGENS DOS INIMIGOS:
   ${enemyContext}
 
+  CONTEXTO DE ALIADOS:
+  ${allyContext}
+
   AÇÕES DA RODADA (JOGADORES):
   ${actionContext}
 
   INSTRUÇÕES FINAIS:
   - Escreva como um autor de fantasia.
-  - Se não houver combate, foque na atmosfera, diálogos e mistério.
   - Se houver combate, use as rolagens fornecidas para narrar o sucesso/falha dos inimigos.
-  - Narre os golpes com impacto visual.
-  - Gerencie HP dos inimigos e jogadores rigorosamente.
-  - **CRÍTICO**: Se um jogador for ferido ou gastar energia, o campo "resourceChanges" -> "value" deve ser um NÚMERO NEGATIVO (ex: -8 HP). Se for curado, POSITIVO.
-  - **MAPA**: ATUALIZE o mini-mapa 5x5. Mova os personagens se eles viajaram. Adicione NOVOS locais se eles foram descobertos. Mantenha os inimigos visíveis.
+  - Se jogadores persuadirem NPCs com sucesso, mova-os de Inimigos para Aliados.
+  - **LOOT**: Se itens forem encontrados, coloque-os em 'nearbyItems'. Se um item for uma mochila, defina slot='back' e capacityBonus.
+  - Gerencie HP, Mana e Estamina dos inimigos, aliados e jogadores rigorosamente.
+  - **LOG**: O campo resourceChanges deve conter TODAS as mudanças numéricas da rodada.
+  - **MAPA**: ATUALIZE o mini-mapa 5x5.
   `;
 
   return callWithRetry(async () => {
