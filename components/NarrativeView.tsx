@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Character, NarrativeTurn, DiceType, RollResult, WorldData, TurnResponse, Enemy, MapData, StatusEffect, Item, Ally, EquipmentSlot } from '../types';
 import { processTurn } from '../services/geminiService';
 import { Button } from './Button';
-import { User, Dices, ChevronDown, Target, Trophy, Skull, Backpack, Heart, Flame, Droplets, Sword, ClipboardList, ScrollText, Map as MapIcon, Compass, ShieldCheck, AlertCircle, Clock, Plus, XCircle, Shield, Hand, ArrowDownToLine, ArrowUpFromLine, Star, Trash, Shirt, Briefcase, Zap } from 'lucide-react';
+import { User, Dices, ChevronDown, Target, Trophy, Skull, Backpack, Heart, Flame, Droplets, Sword, ClipboardList, ScrollText, Map as MapIcon, Compass, ShieldCheck, AlertCircle, Clock, Plus, XCircle, Shield, Hand, ArrowDownToLine, ArrowUpFromLine, Star, Trash, Shirt, Zap } from 'lucide-react';
 
 interface NarrativeViewProps {
   characters: Character[];
@@ -681,14 +681,14 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                                 
                                 {/* EQUIPMENT SLOTS */}
                                 <div className="grid grid-cols-3 gap-2 mb-2">
-                                    {(['back', 'chest', 'legs'] as EquipmentSlot[]).map(slot => {
+                                    {(['back', 'chest', 'hands'] as EquipmentSlot[]).map(slot => {
                                         const equippedItem = char.equipment?.[slot];
                                         return (
                                             <div key={slot} className="bg-slate-900 p-1.5 rounded border border-slate-700 flex flex-col items-center justify-center text-center relative group/slot">
                                                 <span className="text-[8px] text-slate-500 font-bold uppercase mb-1">
                                                     {slot === 'back' && <Backpack size={10} />}
                                                     {slot === 'chest' && <Shirt size={10} />}
-                                                    {slot === 'legs' && <Briefcase size={10} />}
+                                                    {slot === 'hands' && <Sword size={10} />}
                                                 </span>
                                                 {equippedItem ? (
                                                     <div className="w-full">

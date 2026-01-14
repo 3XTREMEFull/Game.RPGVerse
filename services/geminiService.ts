@@ -62,7 +62,6 @@ Seu papel é:
 - **ESTILO LITERÁRIO**: Não seja breve. Escreva descrições ricas, atmosféricas e detalhadas. Use metáforas e descreva os sentidos (cheiros, sons, luzes).
 - **RITMO VARIADO**: Não force combate a todo turno. Permita cenas de exploração, mistério, interação social e introspecção.
 - **FOCO NO ENREDO**: Avance a trama principal e as subtramas dos personagens. Use ganchos narrativos baseados nas Motivações dos personagens.
-- **EVOLUÇÃO**: Se os jogadores estiverem em um momento de descanso ou treino, descreva como eles aprendem com suas experiências.
 
 === SISTEMA DE REGRAS (IMUTÁVEL) ===
 ATRIBUTOS (Escala 1-10):
@@ -72,48 +71,34 @@ ATRIBUTOS (Escala 1-10):
 AVALIAÇÃO DE DIFICULDADE (DC):
 - DC 8 (Muito Fácil) a DC 22 (Lendária).
 
-FÓRMULA DE TESTE:
+FÓRMULA DE TESTE & BÔNUS DE ITENS:
 - 1d20 + Modificador + Habilidade >= DC Escolhida.
+- **IMPORTANTE: SLOT 'MÃOS' (hands)**:
+  - Se o jogador atacar ou agir usando o item equipado no slot 'hands', você DEVE:
+    1. **NARRATIVA**: Descrever explicitamente o uso daquele item (ex: "Você dispara sua Pistola M9...", "Você brande seu Machado...").
+    2. **MECÂNICA**: Aplicar AUTOMATICAMENTE o 'effect' do item ao resultado. Se o item diz "+2 em ataque", some +2 mentalmente ao dado do jogador para definir o sucesso. Se diz "+1d4 dano de fogo", aplique esse dano extra na resolução.
+  - Não pergunte se ele quer usar. Se está equipado e a ação é compatível (ex: Ataque), assuma o uso.
 
 COMBATE, INIMIGOS E ALIADOS:
 - Defina HP baseado na dificuldade (Minion: 10-20, Elite: 40-80, Boss: 150+).
-- **RECURSOS DE NPCs**: Todo inimigo E ALIADO deve ter Mana e Estamina.
-  - Minion/Normal: ~10 Mana / ~10 Estamina.
-  - Elite: ~30 Mana / ~30 Estamina.
-  - Boss: ~100 Mana / ~100 Estamina.
-- Ataques e Dano baseados nos atributos (FOR/DES para físico, INT/SAB para mágico).
 - **USO OBRIGATÓRIO DE DADOS DE INIMIGOS**: O prompt fornecerá as rolagens D20 para cada inimigo. USE esses valores para determinar se eles acertam ou erram os jogadores.
-- **SISTEMA DE ALIADOS**:
-  - Se um jogador tentar persuadir ou recrutar um NPC/Inimigo e obtiver SUCESSO no teste (DC baseada na situação):
-    1. Remova-o da lista 'activeEnemies'.
-    2. Adicione-o na lista 'activeAllies'.
-  - Você (IA) controla os Aliados em combate. Narre as ações deles ajudando o grupo.
 
 RECURSOS & MATEMÁTICA (CRÍTICO):
-- Vida (hp), Estamina (stamina), Mana (mana).
 - **REGRA DE SINAL**: Para DANO ou CUSTO, você DEVE usar valores **NEGATIVOS** (ex: -10 HP, -5 Mana). Para CURA ou RECUPERAÇÃO, use valores POSITIVOS (ex: +5 HP).
 - **LOG DE BATALHA**: Ao causar dano em um INIMIGO ou ALIADO, adicione uma entrada em 'resourceChanges'.
 
-LOOT & ITENS E EQUIPAMENTOS (ATUALIZADO):
-- Se um inimigo morrer ou jogadores investigarem com sucesso:
-- **NÃO force o item no inventário**. USE 'nearbyItems': Coloque os itens encontrados nesta lista.
+LOOT & ITENS E EQUIPAMENTOS:
 - **CLASSIFICAÇÃO DE ITENS**:
-  - Use o campo 'type' para definir o tipo de item: 'consumable' (poções, comida), 'equipment' (armas, roupas) ou 'misc' (chaves, tesouros).
-- **SLOTS DE EQUIPAMENTO**: Itens podem ter um 'slot' específico.
-  - 'back': Mochilas (Aumentam capacidade do inventário. Ex: Mochila Escolar (+5), Mochila Militar (+10)).
-  - 'chest': Coletes, Armaduras, Roupas.
-  - 'legs': Coldres, Bolsas de perna, Calças táticas.
-- Defina 'slot' e 'capacityBonus' (para mochilas) no objeto Item quando gerar loot.
+  - Use o campo 'type' para definir o tipo de item: 'consumable' (poções, comida), 'equipment' (armas, roupas) ou 'misc'.
+- **SLOTS DE EQUIPAMENTO**:
+  - 'hands': Armas, Varinhas, Escudos, Ferramentas. (ESTE É O SLOT PRINCIPAL DE ATAQUE).
+  - 'back': Mochilas.
+  - 'chest': Armaduras, Roupas.
+- Ao gerar itens iniciais, garanta que pelo menos um seja uma ARMA ou FERRAMENTA para o slot 'hands' com um efeito mecânico claro (ex: "Faca Curta", effect: "+1 em rolagens de acerto").
 
-MAPA & NAVEGAÇÃO (VISUAL):
+MAPA & NAVEGAÇÃO:
 - O mapa é uma grade 5x5 representando a REGIÃO IMEDIATA.
-- **ESTRUTURA DO MAPA**:
-  - Use '.' para terreno vazio/estrada.
-  - Use Emojis ÚNICOS para LOCAIS IMPORTANTES criados na história (ex: 🏰 Castelo, 🛖 Cabana, 🌲 Floresta Encantada).
-  - Use Emojis para Personagens (👤), Inimigos (👹) e Aliados (🛡️).
-  - O "Centro" (2,2) geralmente é onde a ação ocorre.
-- **LEGENDA**:
-  - A legenda DEVE listar o significado de cada emoji usado no grid.
+- Use Emojis para Personagens (👤), Inimigos (👹) e Aliados (🛡️).
 `;
 
 const MODEL_NAME = "gemini-3-flash-preview";
@@ -190,9 +175,9 @@ export const generateCharacterDetails = async (world: WorldData, characterConcep
           properties: {
             name: { type: Type.STRING },
             description: { type: Type.STRING },
-            effect: { type: Type.STRING },
+            effect: { type: Type.STRING, description: "Mechanical bonus (e.g., +2 Attack, +1d4 Damage)." },
             type: { type: Type.STRING, enum: ['consumable', 'equipment', 'misc'] },
-            slot: { type: Type.STRING, enum: ['back', 'chest', 'legs'], description: "Optional equipment slot." },
+            slot: { type: Type.STRING, enum: ['back', 'chest', 'hands'], description: "Slot de equipamento." },
             capacityBonus: { type: Type.INTEGER, description: "Only for 'back' items (backpacks)." }
           },
           required: ["name", "description", "effect", "type"]
@@ -207,8 +192,10 @@ export const generateCharacterDetails = async (world: WorldData, characterConcep
   Conceito do Personagem: ${characterConcept}
   
   Gere atributos equilibrados (1-5), 4 habilidades temáticas e 3 itens iniciais.
-  Se o personagem tiver uma mochila, defina slot='back' e capacityBonus.
-  Se o item for poção ou comida, defina type='consumable'.
+  IMPORTANTE:
+  - Gere pelo menos 1 item com slot='hands' (uma arma ou ferramenta principal para o conceito).
+  - No campo 'effect' deste item, coloque um bônus mecânico claro (Ex: "+2 Acerto", "Dano +1d6").
+  - Se o personagem tiver uma mochila, defina slot='back' e capacityBonus.
   `;
 
   return callWithRetry(async () => {
@@ -339,12 +326,20 @@ export const processTurn = async (
     const char = characters.find(c => c.name === p.name);
     const roll = rolls[char?.id || ''];
     if (!char || !roll) return `Ação: ${p.action}`;
+    
     const stats = JSON.stringify(char.attributes);
     const derived = JSON.stringify(char.derived);
-    // Include equipped items in context
-    const equipment = char.equipment ? `Equipado: ${JSON.stringify(char.equipment)}` : "";
-    return `PERSONAGEM: ${p.name}, AÇÃO: "${p.action}", DADO: ${roll.type}(${roll.value}), STATS: ${stats}, RECURSOS: ${derived}, ${equipment}`;
-  }).join('\n');
+    
+    // Explicitamente destacar o item nas mãos para a IA
+    const handsItem = char.equipment?.hands;
+    const handsInfo = handsItem 
+        ? `[ITEM EQUIPADO NAS MÃOS (ARMA PRINCIPAL): "${handsItem.name}". EFEITO MECÂNICO: "${handsItem.effect}". NARRATIVA: Use este item para descrever a ação se for um ataque/uso de ferramenta.]` 
+        : "[MÃOS VAZIAS]";
+    
+    const otherEquipment = `Outros Equipamentos: ${JSON.stringify({ chest: char.equipment?.chest, back: char.equipment?.back })}`;
+
+    return `PERSONAGEM: ${p.name}\n- AÇÃO DECLARADA: "${p.action}"\n- ROLAGEM: ${roll.type}(${roll.value})\n- ${handsInfo}\n- STATS: ${stats}\n- RECURSOS: ${derived}\n- ${otherEquipment}`;
+  }).join('\n\n');
 
   const enemyContext = currentEnemies.length > 0 
     ? `INIMIGOS ATIVOS E SUAS ROLAGENS (D20) PARA ESTA RODADA:
@@ -427,7 +422,7 @@ export const processTurn = async (
                     description: { type: Type.STRING },
                     effect: { type: Type.STRING },
                     type: { type: Type.STRING, enum: ['consumable', 'equipment', 'misc'] },
-                    slot: { type: Type.STRING, enum: ['back', 'chest', 'legs'] },
+                    slot: { type: Type.STRING, enum: ['back', 'chest', 'hands'] },
                     capacityBonus: { type: Type.INTEGER }
                 },
                 required: ["name", "description", "effect", "type"]
@@ -506,7 +501,7 @@ export const processTurn = async (
                 description: { type: Type.STRING },
                 effect: { type: Type.STRING },
                 type: { type: Type.STRING, enum: ['consumable', 'equipment', 'misc'] },
-                slot: { type: Type.STRING, enum: ['back', 'chest', 'legs'] },
+                slot: { type: Type.STRING, enum: ['back', 'chest', 'hands'] },
                 capacityBonus: { type: Type.INTEGER }
             },
             required: ["name", "description", "effect", "type"]
@@ -560,6 +555,7 @@ export const processTurn = async (
 
   INSTRUÇÕES FINAIS:
   - Escreva como um autor de fantasia.
+  - **ITEM NAS MÃOS**: Se o jogador atacou, VERIFIQUE se há um item nas MÃOS (hands). Se houver, descreva o ataque usando essa arma e APLIQUE o bônus mecânico do item na resolução.
   - Se houver combate, use as rolagens fornecidas para narrar o sucesso/falha dos inimigos.
   - Se jogadores persuadirem NPCs com sucesso, mova-os de Inimigos para Aliados.
   - **LOOT**: Se itens forem encontrados, coloque-os em 'nearbyItems'. Se um item for uma mochila, defina slot='back' e capacityBonus.

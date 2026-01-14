@@ -37,7 +37,7 @@ export interface DerivedStats {
   mana: number;    // 5 + (INT * 3)
 }
 
-export type EquipmentSlot = 'back' | 'chest' | 'legs';
+export type EquipmentSlot = 'back' | 'chest' | 'hands';
 
 export interface Item {
   id?: string; // Unique ID to prevent duplication
