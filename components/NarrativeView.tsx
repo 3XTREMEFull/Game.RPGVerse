@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Character, NarrativeTurn, DiceType, RollResult, WorldData, TurnResponse, Enemy, MapData, StatusEffect, Item, Ally, EquipmentSlot, TimeData, NeutralNPC } from '../types';
 import { processTurn } from '../services/geminiService';
 import { Button } from './Button';
-import { User, Dices, ChevronDown, Target, Trophy, Skull, Backpack, Heart, Flame, Droplets, Sword, ClipboardList, ScrollText, Map as MapIcon, Compass, ShieldCheck, AlertCircle, Clock, Plus, XCircle, Shield, Hand, ArrowDownToLine, ArrowUpFromLine, Star, Trash, Shirt, Zap, Sun, Moon, Sunrise, Sunset, Coins, ShoppingBag, X, DollarSign } from 'lucide-react';
+import { User, Dices, ChevronDown, Target, Trophy, Skull, Backpack, Heart, Flame, Droplets, Sword, ClipboardList, ScrollText, Map as MapIcon, Compass, ShieldCheck, AlertCircle, Clock, Plus, XCircle, Shield, Hand, ArrowDownToLine, ArrowUpFromLine, Star, Trash, Shirt, Zap, Sun, Moon, Sunrise, Sunset, Coins, ShoppingBag, X, DollarSign, PenTool, Gift } from 'lucide-react';
 
 interface NarrativeViewProps {
   characters: Character[];
@@ -12,6 +12,8 @@ interface NarrativeViewProps {
   initialEnemies?: Enemy[];
   initialAllies?: Ally[];
   karmicDiceEnabled?: boolean;
+  permadeathEnabled?: boolean;
+  humanGmEnabled?: boolean;
   initialMapData?: MapData;
   onStateChange: (hasEnemies: boolean, gameResult: 'victory' | 'defeat' | null) => void;
 }
@@ -58,39 +60,29 @@ const MapPin = ({ symbol, label, type = 'poi' }: { symbol: string, label?: strin
     <div className="relative flex flex-col items-center justify-center z-10 group w-full h-full">
         <div className={`relative flex items-center justify-center w-full h-full transition-transform duration-200 hover:scale-110`}>
             {type === 'actor' ? (
-                 <span className="text-xl md:text-2xl drop-shadow-md filter">{symbol}</span>
+                 <span className="text-xl md:text-2xl drop-shadow-md filter text-slate-900">{symbol}</span>
             ) : (
-                 <span className="text-lg md:text-xl drop-shadow-sm text-slate-400">{symbol}</span>
+                 <span className="text-lg md:text-xl drop-shadow-sm text-amber-900/80 font-serif">{symbol}</span>
             )}
         </div>
         {label && (
-            <div className="absolute bottom-full mb-1 bg-slate-900 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none border border-slate-700">
+            <div className="absolute bottom-full mb-1 bg-amber-100 text-amber-900 text-[9px] font-bold px-1.5 py-0.5 rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none border border-amber-300">
                 {label}
             </div>
         )}
     </div>
 );
 
-// Time Widget Component
-const TimeWidget: React.FC<{ timeData: TimeData }> = ({ timeData }) => {
-    const getIcon = () => {
-        switch(timeData.phase) {
-            case 'DAWN': return <Sunrise className="text-orange-400" size={16} />;
-            case 'DAY': return <Sun className="text-yellow-400" size={16} />;
-            case 'DUSK': return <Sunset className="text-purple-400" size={16} />;
-            case 'NIGHT': return <Moon className="text-blue-200" size={16} />;
-            default: return <Sun size={16} />;
-        }
-    };
-
-    return (
-        <div className="flex items-center gap-2 bg-slate-900/80 px-3 py-1 rounded-full border border-slate-700 text-xs shadow-lg whitespace-nowrap">
-             <span className="font-bold text-slate-400 uppercase tracking-wider mr-1">Dia {timeData.dayCount}</span>
-             {getIcon()}
-             <span className="text-slate-200 font-serif italic truncate max-w-[100px] md:max-w-none">{timeData.description}</span>
+// New Header Icons with Tooltip (Corrected alignment)
+const HeaderIcon: React.FC<{ icon: React.ReactNode, label: string, value: string, colorClass: string, align?: 'left' | 'right' }> = ({ icon, label, value, colorClass, align = 'right' }) => (
+    <div className="relative group flex items-center justify-center p-2 rounded-full hover:bg-slate-800/50 transition-colors cursor-help">
+        <div className={`${colorClass} drop-shadow-md`}>{icon}</div>
+        <div className={`absolute top-full ${align === 'left' ? 'left-0' : 'right-0'} mt-2 w-48 bg-slate-950 border border-slate-800 p-2 rounded shadow-xl opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50`}>
+            <div className="text-[9px] font-bold uppercase text-slate-500 mb-1">{label}</div>
+            <div className={`text-xs font-bold ${colorClass}`}>{value}</div>
         </div>
-    );
-};
+    </div>
+);
 
 export const NarrativeView: React.FC<NarrativeViewProps> = ({ 
     characters: initialCharacters, 
@@ -99,12 +91,15 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
     initialEnemies,
     initialAllies,
     karmicDiceEnabled = true,
+    permadeathEnabled = false,
+    humanGmEnabled = false,
     initialMapData,
     onStateChange
 }) => {
   const [activeCharacters, setActiveCharacters] = useState<Character[]>(initialCharacters.map(c => ({...c, status: c.status || [], equipment: c.equipment || {}, wealth: c.wealth || 0})));
   const [history, setHistory] = useState<NarrativeTurn[]>(initialHistory);
   const [actions, setActions] = useState<Record<string, string>>({});
+  const [gmSuggestion, setGmSuggestion] = useState("");
   const [selectedDice, setSelectedDice] = useState<Record<string, DiceType>>({});
   const [isProcessing, setIsProcessing] = useState(false);
   const [gameResult, setGameResult] = useState<'victory' | 'defeat' | null>(null);
@@ -123,6 +118,9 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
 
   // UI state for adding statuses
   const [addingStatusTo, setAddingStatusTo] = useState<{id: string, type: 'enemy' | 'character'} | null>(null);
+
+  // UI state for giving items (Player to Player trade)
+  const [givingItem, setGivingItem] = useState<{charId: string, itemIndex: number} | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const logsBottomRef = useRef<HTMLDivElement>(null);
@@ -245,12 +243,44 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
     addLog('Inventário', `Jogou ${item.name} no chão.`, 'system-info');
   };
 
-  const handleUseItem = (charId: string, item: Item, itemIndex: number) => {
-      if (enemies.length > 0) {
-          addLog('Ação Bloqueada', 'Não é possível usar itens instantâneos em combate.', 'system-info');
+  const handleGiveItem = (sourceCharId: string, targetCharId: string, itemIndex: number) => {
+      const sourceChar = activeCharacters.find(c => c.id === sourceCharId);
+      const targetChar = activeCharacters.find(c => c.id === targetCharId);
+      if (!sourceChar || !targetChar) return;
+
+      const itemToGive = sourceChar.items[itemIndex];
+      if (!itemToGive) return;
+
+      if (targetChar.items.length >= getInventoryLimit(targetChar)) {
+          addLog('Troca', `${targetChar.name} não tem espaço na mochila.`, 'system-info');
+          setGivingItem(null);
           return;
       }
 
+      // Check duplicates
+      if (targetChar.items.some(i => i.name === itemToGive.name)) {
+          addLog('Troca', `${targetChar.name} já possui esse item.`, 'system-info');
+          setGivingItem(null);
+          return;
+      }
+
+      setActiveCharacters(prev => prev.map(c => {
+          if (c.id === sourceCharId) {
+              return { ...c, items: c.items.filter((_, idx) => idx !== itemIndex) };
+          }
+          if (c.id === targetCharId) {
+              return { ...c, items: [...c.items, itemToGive] };
+          }
+          return c;
+      }));
+
+      addLog('Troca', `${sourceChar.name} deu ${itemToGive.name} para ${targetChar.name}.`, 'system-info');
+      setGivingItem(null);
+  };
+
+  const handleUseItem = (charId: string, item: Item, itemIndex: number) => {
+      // Allow consumables in combat (Updated as per request)
+      
       setActiveCharacters(prev => prev.map(c => {
           if (c.id === charId) {
               const hpMatch = item.effect.match(/(?:recupera|cura|ganha|\+)\s*(\d+)\s*(?:hp|vida)/i);
@@ -385,17 +415,49 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
     if (!worldData) return;
     const turnPlayerRolls: Record<string, RollResult> = {};
     activeCharacters.forEach(c => {
+      // Se morte permanente ativa e HP <= 0, não rola dado
+      if (permadeathEnabled && c.derived.hp <= 0) return;
+
       const dieType = selectedDice[c.id] || 'D20';
       const result = rollDie(dieType, c.id);
       turnPlayerRolls[c.id] = { type: dieType, value: result };
       addLog(c.name, `Tentativa de Ação`, 'player-roll', result);
     });
 
-    setHistory(prev => [...prev, { role: 'player', content: activeCharacters.map(c => `> **${c.name}**: ${actions[c.id] || "Aguarda..."}`).join('\n'), timestamp: Date.now() }]);
+    const activeCharsForStory = activeCharacters.filter(c => !permadeathEnabled || c.derived.hp > 0);
+    const contentLog = activeCharacters.map(c => {
+        const action = actions[c.id];
+        if (permadeathEnabled && c.derived.hp <= 0) {
+            return `> **${c.name}**: (CAÍDO/INCONSCIENTE)`;
+        }
+        return `> **${c.name}**: ${action || "Aguarda..."}`;
+    }).join('\n');
+
+    setHistory(prev => [...prev, { role: 'player', content: contentLog, timestamp: Date.now() }]);
+    
+    // Preparar ações para enviar (filtrando ou marcando mortos)
+    const actionsToSend = activeCharacters.map(c => ({
+        name: c.name,
+        action: (permadeathEnabled && c.derived.hp <= 0) ? "INCONSCIENTE/CAÍDO" : (actions[c.id] || "")
+    }));
+
     setActions({});
+    setGmSuggestion(""); // Limpa sugestão do GM
     setIsProcessing(true);
     try {
-      const response: TurnResponse = await processTurn(history, activeCharacters.map(c => ({name: c.name, action: actions[c.id] || ""})), activeCharacters, turnPlayerRolls, worldData, enemies, activeAllies, activeNeutrals, timeData);
+      const response: TurnResponse = await processTurn(
+          history, 
+          actionsToSend, 
+          activeCharacters, 
+          turnPlayerRolls, 
+          worldData, 
+          enemies, 
+          activeAllies, 
+          activeNeutrals, 
+          timeData,
+          permadeathEnabled,
+          gmSuggestion
+      );
       let updatedCharacters = [...activeCharacters];
       
       if (response.systemLogs) {
@@ -409,7 +471,11 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
           const charIndex = updatedCharacters.findIndex(c => c.name === change.characterName);
           if (charIndex !== -1) {
               const res = change.resource;
-              updatedCharacters[charIndex] = { ...updatedCharacters[charIndex], derived: { ...updatedCharacters[charIndex].derived, [res]: Math.max(0, updatedCharacters[charIndex].derived[res] + change.value) } };
+              // Permite HP negativo se permadeathEnabled para lógica de morte, senão trava em 0
+              let newValue = updatedCharacters[charIndex].derived[res] + change.value;
+              if (!permadeathEnabled) newValue = Math.max(0, newValue);
+              
+              updatedCharacters[charIndex] = { ...updatedCharacters[charIndex], derived: { ...updatedCharacters[charIndex].derived, [res]: newValue } };
               addLog('Sistema', `${change.characterName}: ${res.toUpperCase()} ${change.value > 0 ? '+' : ''}${change.value}`, change.value < 0 ? 'damage' : 'gain');
           } else {
              addLog('Sistema', `${change.characterName}: ${change.resource.toUpperCase()} ${change.value > 0 ? '+' : ''}${change.value}`, change.value < 0 ? 'damage' : 'gain');
@@ -466,6 +532,11 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
       if (response.timeData) setTimeData(response.timeData);
 
       if (response.mapData) {
+          // Se o local mudou, limpamos os itens do chão que ficaram para trás
+          if (mapData && response.mapData.locationName !== mapData.locationName) {
+              setNearbyItems([]);
+              addLog('Ambiente', 'Nova localização alcançada. Itens anteriores deixados para trás.', 'system-info');
+          }
           setMapData(response.mapData);
       }
       
@@ -594,17 +665,26 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
 
       <div className="flex flex-col flex-1 bg-slate-900/50 rounded-xl overflow-hidden border border-slate-800 shadow-2xl relative order-2 md:order-1">
         {worldData && (
-          <div className="bg-slate-950/90 backdrop-blur-md border-b border-amber-900/30 p-2 flex items-center justify-between gap-2 px-4 shadow-md absolute top-0 left-0 right-0 z-20">
-            <div className="flex items-center gap-2 flex-1 min-w-0" title={worldData.mainObjective}>
-                <Target size={14} className="text-amber-500 shrink-0" />
-                <span className="text-xs text-amber-100 font-bold truncate cursor-help hover:text-white transition-colors">
-                    {worldData.mainObjective}
-                </span>
-            </div>
-            <TimeWidget timeData={timeData} />
+          <div className="bg-slate-950/90 backdrop-blur-md border-b border-amber-900/30 p-2 flex items-center justify-between gap-4 px-4 shadow-md absolute top-0 left-0 right-0 z-20">
+            {/* New Compact Header with Tooltips */}
+            <HeaderIcon 
+                icon={<Target size={18} />} 
+                label="Objetivo Atual" 
+                value={worldData.mainObjective} 
+                colorClass="text-amber-500" 
+                align="left"
+            />
+            <div className="flex-1"></div>
+            <HeaderIcon 
+                icon={timeData.phase === 'NIGHT' ? <Moon size={18} /> : <Sun size={18} />} 
+                label={`Dia ${timeData.dayCount} - ${timeData.phase}`} 
+                value={timeData.description} 
+                colorClass={timeData.phase === 'DAY' ? 'text-yellow-400' : 'text-blue-300'} 
+                align="right"
+            />
           </div>
         )}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6 pt-14">
+        <div className="flex-1 overflow-y-auto p-6 space-y-6 pt-16">
           {history.map((turn, index) => (
              turn.role !== 'system' && (
                 <div key={index} className={`flex flex-col ${turn.role === 'gm' ? 'items-start' : 'items-end'}`}>
@@ -619,23 +699,52 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
           <div ref={bottomRef} />
         </div>
         <div className="bg-slate-950 border-t border-slate-800 p-4 md:p-6 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] z-10">
-          <div className="grid grid-cols-1 gap-4 mb-4">
-            {activeCharacters.map((char) => (
-              <div key={char.id} className="bg-slate-900 border border-slate-800 rounded-lg p-1">
-                <div className="flex items-center justify-between px-2 py-1 mb-1">
-                  <div className="text-xs font-bold text-blue-400 flex items-center gap-1"><User size={10} /> {char.name}</div>
-                  <div className="relative group/dice">
-                    <select value={selectedDice[char.id] || 'D20'} onChange={(e) => setSelectedDice(prev => ({ ...prev, [char.id]: e.target.value as DiceType }))} className="bg-slate-800 text-amber-500 text-[10px] font-bold py-1 px-2 rounded border border-slate-700 outline-none cursor-pointer appearance-none pr-6 hover:border-amber-500 transition-colors">
-                      {diceOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                    </select>
-                    <ChevronDown size={10} className="absolute right-1 top-1.5 text-amber-500 pointer-events-none" />
-                  </div>
-                </div>
-                <textarea value={actions[char.id] || ''} onChange={(e) => setActions(prev => ({ ...prev, [char.id]: e.target.value }))} placeholder={`O que ${char.name} faz?`} rows={2} disabled={isProcessing} className="w-full bg-slate-950/50 rounded p-2 text-sm text-slate-200 focus:bg-slate-900 outline-none resize-none border-none"/>
+          
+          {/* GM Input Section */}
+          {humanGmEnabled && (
+              <div className="mb-3 bg-purple-900/20 border border-purple-500/30 p-2 rounded flex items-center gap-2">
+                  <span className="text-purple-400 font-bold uppercase text-[10px] whitespace-nowrap px-2 flex items-center gap-1"><PenTool size={10}/> GM Sugere:</span>
+                  <input 
+                      type="text" 
+                      value={gmSuggestion}
+                      onChange={(e) => setGmSuggestion(e.target.value)}
+                      placeholder="Ex: 'Um dragão aparece de repente!' (A IA narrará isso)"
+                      className="w-full bg-transparent text-sm text-purple-200 placeholder-purple-500/50 outline-none"
+                  />
               </div>
-            ))}
+          )}
+
+          <div className="grid grid-cols-1 gap-4 mb-4">
+            {activeCharacters.map((char) => {
+              const isDown = permadeathEnabled && char.derived.hp <= 0;
+              return (
+                <div key={char.id} className={`bg-slate-900 border border-slate-800 rounded-lg p-1 ${isDown ? 'opacity-60 grayscale' : ''}`}>
+                  <div className="flex items-center justify-between px-2 py-1 mb-1">
+                    <div className="text-xs font-bold text-blue-400 flex items-center gap-1">
+                        <User size={10} /> {char.name} 
+                        {isDown && <span className="text-red-500 font-bold uppercase ml-2 animate-pulse">[CAÍDO]</span>}
+                    </div>
+                    {!isDown && (
+                        <div className="relative group/dice">
+                        <select value={selectedDice[char.id] || 'D20'} onChange={(e) => setSelectedDice(prev => ({ ...prev, [char.id]: e.target.value as DiceType }))} className="bg-slate-800 text-amber-500 text-[10px] font-bold py-1 px-2 rounded border border-slate-700 outline-none cursor-pointer appearance-none pr-6 hover:border-amber-500 transition-colors">
+                            {diceOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                        </select>
+                        <ChevronDown size={10} className="absolute right-1 top-1.5 text-amber-500 pointer-events-none" />
+                        </div>
+                    )}
+                  </div>
+                  <textarea 
+                    value={isDown ? "Inconsciente (Precisa de ajuda!)" : (actions[char.id] || '')} 
+                    onChange={(e) => setActions(prev => ({ ...prev, [char.id]: e.target.value }))} 
+                    placeholder={isDown ? "" : `O que ${char.name} faz?`} 
+                    rows={2} 
+                    disabled={isProcessing || isDown} 
+                    className={`w-full bg-slate-950/50 rounded p-2 text-sm text-slate-200 focus:bg-slate-900 outline-none resize-none border-none ${isDown ? 'cursor-not-allowed italic text-red-400' : ''}`}
+                  />
+                </div>
+            )})}
           </div>
-          <Button onClick={submitTurn} disabled={isProcessing} variant={activeCharacters.every(c => (actions[c.id] || '').length > 0) ? 'primary' : 'secondary'} className="w-full">Enviar Turno</Button>
+          <Button onClick={submitTurn} disabled={isProcessing} variant={activeCharacters.filter(c => !permadeathEnabled || c.derived.hp > 0).every(c => (actions[c.id] || '').length > 0) ? 'primary' : 'secondary'} className="w-full">Enviar Turno</Button>
         </div>
       </div>
       <div className="w-full md:w-80 bg-slate-900/50 rounded-xl border border-slate-800 shadow-xl overflow-hidden flex flex-col order-1 md:order-2 h-[500px] md:h-auto">
@@ -701,7 +810,9 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                                     {npc.isMerchant && (
                                         <button 
                                             onClick={() => setTradeTarget(npc)}
-                                            className="w-full mt-2 py-1 bg-amber-700/50 hover:bg-amber-600 text-amber-100 border border-amber-600/50 rounded flex items-center justify-center gap-1 text-[10px] font-bold transition-colors"
+                                            disabled={enemies.length > 0}
+                                            title={enemies.length > 0 ? "Comércio bloqueado em combate" : "Comerciar"}
+                                            className="w-full mt-2 py-1 bg-amber-700/50 hover:bg-amber-600 text-amber-100 border border-amber-600/50 rounded flex items-center justify-center gap-1 text-[10px] font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-slate-800"
                                         >
                                             <ShoppingBag size={10} /> Comerciar
                                         </button>
@@ -751,7 +862,9 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                             </div>
 
                             <div className="grid grid-cols-3 gap-1 text-[10px] font-mono border-y border-slate-800/30 py-1">
-                                <span className="text-red-400 flex items-center gap-1"><Heart size={10}/> {char.derived.hp}</span>
+                                <span className={`${char.derived.hp <= 0 && permadeathEnabled ? 'text-slate-600' : 'text-red-400'} flex items-center gap-1`}>
+                                    <Heart size={10}/> {char.derived.hp}
+                                </span>
                                 <span className="text-blue-400 flex items-center gap-1"><Droplets size={10}/> {char.derived.mana}</span>
                                 <span className="text-green-400 flex items-center gap-1"><Flame size={10}/> {char.derived.stamina}</span>
                             </div>
@@ -890,7 +1003,7 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
 
                                 <div className="space-y-1">
                                     {char.items.map((item, i) => (
-                                        <div key={i} className="bg-slate-900/50 p-1 rounded text-[9px] flex justify-between items-center group">
+                                        <div key={i} className="bg-slate-900/50 p-1 rounded text-[9px] flex justify-between items-center group relative">
                                             <div className="flex flex-col">
                                                 <div className="flex items-center gap-1">
                                                     <span className="font-bold text-slate-200">{item.name}</span>
@@ -903,9 +1016,9 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                                                 {item.type === 'consumable' && (
                                                     <button 
                                                         onClick={(e) => { e.stopPropagation(); handleUseItem(char.id, item, i); }}
-                                                        disabled={enemies.length > 0}
+                                                        // Habilitado em combate
                                                         className="p-1 text-slate-500 hover:text-amber-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                                                        title={enemies.length > 0 ? "Bloqueado em Combate" : "Usar Item"}
+                                                        title="Usar Item"
                                                     >
                                                         <Zap size={10} />
                                                     </button>
@@ -920,6 +1033,41 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                                                         <ShieldCheck size={10} />
                                                     </button>
                                                 )}
+                                                
+                                                {/* Botão de Dar/Trocar */}
+                                                <div className="relative">
+                                                    <button 
+                                                        onClick={(e) => { 
+                                                            e.stopPropagation(); 
+                                                            setGivingItem(givingItem?.itemIndex === i && givingItem?.charId === char.id ? null : {charId: char.id, itemIndex: i}); 
+                                                        }}
+                                                        disabled={enemies.length > 0}
+                                                        className="p-1 text-slate-500 hover:text-purple-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                                        title={enemies.length > 0 ? "Troca bloqueada em combate" : "Dar para outro jogador"}
+                                                    >
+                                                        <Gift size={10} />
+                                                    </button>
+                                                    {/* Menu de seleção de jogador para troca */}
+                                                    {givingItem?.charId === char.id && givingItem?.itemIndex === i && (
+                                                        <div className="absolute right-0 bottom-full mb-1 bg-slate-900 border border-slate-700 rounded shadow-xl z-20 w-32 overflow-hidden flex flex-col">
+                                                            <div className="text-[8px] bg-slate-800 text-slate-400 px-2 py-1 font-bold uppercase">Dar para:</div>
+                                                            {activeCharacters.filter(c => c.id !== char.id).length === 0 ? (
+                                                                <div className="p-2 text-[8px] text-slate-500 italic">Ninguém próximo.</div>
+                                                            ) : (
+                                                                activeCharacters.filter(c => c.id !== char.id).map(target => (
+                                                                    <button
+                                                                        key={target.id}
+                                                                        onClick={(e) => { e.stopPropagation(); handleGiveItem(char.id, target.id, i); }}
+                                                                        className="text-left px-2 py-1.5 text-[9px] text-slate-300 hover:bg-purple-900/50 hover:text-white transition-colors border-b border-slate-800 last:border-0"
+                                                                    >
+                                                                        {target.name}
+                                                                    </button>
+                                                                ))
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </div>
+
                                                 <button 
                                                     onClick={(e) => { e.stopPropagation(); handleDropItem(char.id, item, i); }}
                                                     disabled={enemies.length > 0}
@@ -940,26 +1088,32 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
             )}
             {activeTab === 'map' && mapData && (
                 <div className="animate-fade-in flex flex-col h-full space-y-4">
-                    <h4 className="text-xs text-green-500/80 font-bold uppercase mb-3 flex items-center gap-2"><Compass size={12} /> Cartografia</h4>
-                    <div className="bg-slate-950 border border-slate-800 rounded p-2 text-center shadow-inner"><h5 className="font-cinzel text-amber-100 text-xs font-bold truncate">{mapData.locationName}</h5></div>
+                    <h4 className="text-xs text-amber-700 font-bold uppercase mb-3 flex items-center gap-2"><Compass size={12} /> Cartografia</h4>
+                    <div className="bg-[#e6d5b8] border-2 border-[#8b5a2b] rounded p-2 text-center shadow-md">
+                        <h5 className="font-cinzel text-[#5c4033] text-xs font-bold truncate tracking-wider">{mapData.locationName}</h5>
+                    </div>
                     
-                    {/* Fixed Standard Grid */}
-                    <div className="relative aspect-square w-full bg-slate-900 border-4 border-slate-800 rounded-lg shadow-2xl p-2">
-                        <div className="grid grid-cols-5 grid-rows-5 gap-1 h-full w-full">
+                    {/* Old Map Style Container */}
+                    <div className="relative aspect-square w-full bg-[#e6d5b8] rounded-lg shadow-2xl p-4 overflow-hidden border-4 border-[#8b5a2b]">
+                         {/* Texture overlay via CSS gradient/filter simulation */}
+                        <div className="absolute inset-0 pointer-events-none opacity-20 bg-[url('https://www.transparenttextures.com/patterns/aged-paper.png')] mix-blend-multiply"></div>
+                        <div className="absolute inset-0 pointer-events-none opacity-10 bg-gradient-to-br from-[#d2b48c] to-[#a0522d]"></div>
+                        
+                        <div className="grid grid-cols-5 grid-rows-5 gap-0 h-full w-full relative z-10">
                             {mapData.grid?.map((row, rIdx) => (row?.map((cell, cIdx) => (
-                                <div key={`${rIdx}-${cIdx}`} className="bg-slate-950 border border-slate-800 rounded flex items-center justify-center relative hover:border-slate-600 transition-colors group/cell">
-                                    {cell === '.' ? <div className="text-slate-800 text-[10px]">+</div> : <MapPin symbol={cell} label={mapData.legend.find(l => l.symbol === cell)?.description} type={['👹', '👤', '💰'].some(e => cell.includes(e)) ? 'actor' : 'poi'} />}
+                                <div key={`${rIdx}-${cIdx}`} className="flex items-center justify-center relative hover:bg-[#dcbfa3]/30 transition-colors group/cell border border-[#8b5a2b]/10">
+                                    {cell === '.' ? <div className="text-[#8b5a2b]/20 text-[10px] font-serif">.</div> : <MapPin symbol={cell} label={mapData.legend.find(l => l.symbol === cell)?.description} type={['👹', '👤', '💰'].some(e => cell.includes(e)) ? 'actor' : 'poi'} />}
                                 </div>
                             ))))}
                         </div>
                     </div>
 
-                    <div className="bg-slate-900/50 p-2 rounded border border-slate-800 text-[10px] space-y-1 max-h-[150px] overflow-y-auto">
-                         <h5 className="font-bold text-slate-500 uppercase text-[9px]">Legenda</h5>
+                    <div className="bg-[#e6d5b8] p-3 rounded border border-[#8b5a2b] text-[10px] space-y-1 max-h-[150px] overflow-y-auto shadow-inner text-[#4a3b2a]">
+                         <h5 className="font-bold text-[#8b5a2b] uppercase text-[9px] border-b border-[#8b5a2b]/30 pb-1 mb-2">Legenda do Mapa</h5>
                          {mapData.legend.map((l, i) => (
-                             <div key={i} className="flex gap-2 items-center text-slate-300">
-                                 <span className="w-4 text-center font-bold">{l.symbol}</span>
-                                 <span>{l.description}</span>
+                             <div key={i} className="flex gap-2 items-center">
+                                 <span className="w-5 text-center font-bold text-lg">{l.symbol}</span>
+                                 <span className="font-serif italic">{l.description}</span>
                              </div>
                          ))}
                     </div>

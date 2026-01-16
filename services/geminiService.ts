@@ -58,6 +58,11 @@ ATRIBUTOS (Escala 1-10): FOR, DES, CON, INT, SAB, CAR, AGI, SOR. Modificador = A
 **IMPORTANTE: SLOT 'MÃOS' (hands)**:
   - Se o jogador atacar com item equipado, aplique bônus mecânicos automaticamente.
 
+**HABILIDADES E PASSIVAS**:
+- Você deve ler as 'SKILLS' fornecidas no contexto da ação.
+- Se uma habilidade dá bônus (ex: "Dobrar bônus de FOR", "Furtividade"), APLIQUE-O na narração e no resultado.
+- Passivas devem ser verificadas automaticamente.
+
 COMBATE, INIMIGOS, ALIADOS E NEUTROS:
 - Inimigos (Vermelho): Hostis.
 - Aliados (Azul): Amigos/Pets que lutam.
@@ -67,8 +72,10 @@ COMBATE, INIMIGOS, ALIADOS E NEUTROS:
 RECURSOS & MATEMÁTICA (CRÍTICO):
 - **REGRA DE SINAL**: Dano/Custo = NEGATIVO. Cura/Ganho = POSITIVO.
 
-LOOT & COMÉRCIO:
-- **REGRA DE LOOT (SORTE)**: Ao saquear, role 1d20 + SOR ocultamente para definir a qualidade.
+LOOT & ITENS (CRÍTICO):
+- **GERAÇÃO DE ITENS**: Se você narrar que um item caiu, foi encontrado, ou está em um baú, você **OBRIGATORIAMENTE** deve adicionar esse item ao array 'nearbyItems' na resposta JSON.
+- Se o item for dado diretamente ao jogador, use 'inventoryUpdates'.
+**REGRA DE LOOT (SORTE)**: Ao saquear, role 1d20 + SOR ocultamente para definir a qualidade.
 - **ECONOMIA**: Os preços devem fazer sentido com a moeda definida no 'WorldData'.
 
 MAPA & NAVEGAÇÃO:
@@ -214,8 +221,6 @@ export const startNarrative = async (world: WorldData, characters: Character[]):
     type: Type.OBJECT,
     properties: {
         storyText: { type: Type.STRING },
-        // CORREÇÃO: Definimos as propriedades completas de Enemy, Ally e NeutralNPC para validar o schema,
-        // mas instruímos via prompt a retornar listas vazias ou populadas conforme a lógica.
         activeEnemies: {
             type: Type.ARRAY,
             items: {
@@ -344,7 +349,9 @@ export const processTurn = async (
   currentEnemies: Enemy[],
   currentAllies: Ally[] = [],
   currentNeutrals: NeutralNPC[] = [],
-  currentTime?: TimeData
+  currentTime?: TimeData,
+  permadeathEnabled: boolean = false,
+  humanGmSuggestion?: string
 ): Promise<TurnResponse> => {
   const context = history.map(h => {
       if (h.role === 'system') return `[SISTEMA]: ${h.content}`;
@@ -354,17 +361,23 @@ export const processTurn = async (
   const actionContext = playerActions.map(p => {
     const char = characters.find(c => c.name === p.name);
     const roll = rolls[char?.id || ''];
+    // Se o personagem estiver inconsciente (HP <= 0 e permadeath on), a ação vem vazia ou marcada
+    if (!p.action || p.action === "INCONSCIENTE/CAÍDO") {
+        return `PERSONAGEM: ${p.name} está CAÍDO/INCONSCIENTE (HP <= 0) e não pode agir.`;
+    }
+
     if (!char || !roll) return `Ação: ${p.action}`;
     
     const stats = JSON.stringify(char.attributes);
-    const derived = JSON.stringify(char.derived);
+    // Inclui skills no contexto para a IA saber das passivas
+    const skills = char.skills.map(s => `[${s.type.toUpperCase()}] ${s.name}: ${s.description}`).join('; ');
     
     const handsItem = char.equipment?.hands;
     const handsInfo = handsItem 
         ? `[ITEM: "${handsItem.name}". EFEITO: "${handsItem.effect}"]` 
         : "[MÃOS VAZIAS]";
     
-    return `PERSONAGEM: ${p.name}\n- AÇÃO: "${p.action}"\n- DADO: ${roll.type}(${roll.value})\n- ${handsInfo}\n- STATS: ${stats}\n- DINHEIRO: ${char.wealth} ${world.currencyName}`;
+    return `PERSONAGEM: ${p.name}\n- AÇÃO: "${p.action}"\n- DADO: ${roll.type}(${roll.value})\n- ${handsInfo}\n- SKILLS: ${skills}\n- STATS: ${stats}\n- DINHEIRO: ${char.wealth} ${world.currencyName}`;
   }).join('\n\n');
 
   const enemyContext = currentEnemies.length > 0 
@@ -378,6 +391,20 @@ export const processTurn = async (
   const timeContext = currentTime 
     ? `TEMPO ATUAL: Dia ${currentTime.dayCount}, Fase: ${currentTime.phase} (${currentTime.description}).`
     : "TEMPO: Inicio.";
+
+  let extraInstructions = "";
+  if (permadeathEnabled) {
+      extraInstructions += `\n**MODO MORTE HABILITADO**:
+      - Personagens com HP <= 0 ficam no estado "CAÍDO" (Inconsciente).
+      - Narre uma oportunidade dramática para os aliados salvarem o personagem caído nesta cena.
+      - Se ninguém salvar (cura ou teste de medicina) após uma rodada crítica, o personagem MORRE definitivamente.
+      - Se TODOS os jogadores estiverem mortos ou caídos sem aliados para ajudar, defina 'isGameOver: true' e 'gameResult: DEFEAT'.
+      `;
+  }
+
+  if (humanGmSuggestion) {
+      extraInstructions += `\n**SUGESTÃO DO GM HUMANO (PRIORIDADE MÁXIMA)**: O GM humano instruiu: "${humanGmSuggestion}". Você DEVE incorporar essa sugestão na narrativa da próxima cena, criando os inimigos, eventos ou itens que o GM solicitou, mas mantendo as regras de dados e atributos.`;
+  }
 
   const schema: Schema = {
     type: Type.OBJECT,
@@ -437,6 +464,8 @@ export const processTurn = async (
 
   ${timeContext}
   AVANÇO DO TEMPO: Baseado nas ações e narrativa, avance o tempo de forma lógica (ex: Tarde -> Noite). Se passaram a noite em algum lugar, avance o dia.
+  
+  ${extraInstructions}
 
   HISTÓRICO RECENTE:
   ${context.slice(-8000)} 
@@ -449,6 +478,8 @@ export const processTurn = async (
   ${actionContext}
 
   INSTRUÇÕES:
+  - **SKILLS**: Verifique as skills listadas acima. Se um jogador usa uma skill, verifique se ele a possui. Aplique bônus de passivas.
+  - **ITENS**: Se você gerar itens no cenário (drop de inimigos, baús, achados), PREENCHA 'nearbyItems'. Se não preencher, eles não aparecerão no jogo.
   - **COMÉRCIO**: Se os jogadores comprarem algo (narrado ou sistema), deduza o dinheiro via 'inventoryUpdates' (usando campo 'cost' ou narrando).
   - **NEUTROS**: Gerencie a lista 'activeNeutrals'. Se um civil for atacado, ele pode virar Inimigo (mova para activeEnemies).
   - **CONTINUIDADE**: Lembre-se do tempo anterior.

@@ -6,7 +6,7 @@ import { CharacterCreation } from './components/CharacterCreation';
 import { NarrativeView } from './components/NarrativeView';
 import { startNarrative } from './services/geminiService';
 import { AudioController, MusicTrack } from './components/AudioController';
-import { Scroll, Users, Map, Dices } from 'lucide-react';
+import { Scroll, Users, Map, Dices, Skull, UserCog } from 'lucide-react';
 
 const App: React.FC = () => {
   const [phase, setPhase] = useState<GamePhase>(GamePhase.SETUP);
@@ -17,7 +17,12 @@ const App: React.FC = () => {
   const [initialAllies, setInitialAllies] = useState<Ally[]>([]);
   const [initialMapData, setInitialMapData] = useState<MapData | undefined>(undefined);
   const [loadingStory, setLoadingStory] = useState(false);
+  
+  // Settings State
   const [karmicDiceEnabled, setKarmicDiceEnabled] = useState(true);
+  const [permadeathEnabled, setPermadeathEnabled] = useState(false);
+  const [humanGmEnabled, setHumanGmEnabled] = useState(false);
+
   const [musicTrack, setMusicTrack] = useState<MusicTrack>('MENU');
 
   // Transition: Setup -> Character Creation
@@ -86,13 +91,12 @@ const App: React.FC = () => {
             </h1>
           </div>
           
-          <div className="hidden md:flex items-center gap-6 text-sm font-bold text-slate-500 uppercase tracking-widest">
+          <div className="hidden md:flex items-center gap-4 text-sm font-bold text-slate-500 uppercase tracking-widest">
             {phase === GamePhase.SETUP && (
-               <div className="flex items-center gap-2 px-3 py-1 bg-slate-800 rounded-full border border-slate-700/50" title={karmicDiceEnabled ? "Ativado" : "Desativado"}>
-                  <Dices size={14} className={karmicDiceEnabled ? "text-purple-400" : "text-slate-600"} />
-                  <span className="text-[10px] text-slate-400">
-                    Dados Kármicos: {karmicDiceEnabled ? "ON" : "OFF"}
-                  </span>
+               <div className="flex gap-2">
+                   {karmicDiceEnabled && <Dices size={14} className="text-purple-400" />}
+                   {permadeathEnabled && <Skull size={14} className="text-red-500" />}
+                   {humanGmEnabled && <UserCog size={14} className="text-amber-400" />}
                </div>
             )}
             <span className={`flex items-center gap-2 ${phase === GamePhase.SETUP ? 'text-amber-500' : ''}`}>
@@ -117,6 +121,10 @@ const App: React.FC = () => {
             onWorldCreated={handleWorldCreated} 
             karmicDice={karmicDiceEnabled}
             setKarmicDice={setKarmicDiceEnabled}
+            permadeath={permadeathEnabled}
+            setPermadeath={setPermadeathEnabled}
+            humanGm={humanGmEnabled}
+            setHumanGm={setHumanGmEnabled}
           />
         )}
 
@@ -141,6 +149,8 @@ const App: React.FC = () => {
             initialEnemies={initialEnemies}
             initialAllies={initialAllies}
             karmicDiceEnabled={karmicDiceEnabled}
+            permadeathEnabled={permadeathEnabled}
+            humanGmEnabled={humanGmEnabled}
             initialMapData={initialMapData}
             onStateChange={handleNarrativeStateChange}
           />

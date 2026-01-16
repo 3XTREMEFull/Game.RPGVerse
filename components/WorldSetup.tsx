@@ -1,16 +1,29 @@
+
 import React, { useState } from 'react';
 import { WorldData } from '../types';
 import { generateWorldPremise } from '../services/geminiService';
 import { Button } from './Button';
-import { Sparkles, Globe2, BookOpen, PenTool, Shuffle, Target, Dices, Info } from 'lucide-react';
+import { Sparkles, Globe2, BookOpen, PenTool, Shuffle, Target, Dices, Info, Skull, UserCog } from 'lucide-react';
 
 interface WorldSetupProps {
   onWorldCreated: (data: WorldData) => void;
   karmicDice: boolean;
   setKarmicDice: (value: boolean) => void;
+  permadeath: boolean;
+  setPermadeath: (value: boolean) => void;
+  humanGm: boolean;
+  setHumanGm: (value: boolean) => void;
 }
 
-export const WorldSetup: React.FC<WorldSetupProps> = ({ onWorldCreated, karmicDice, setKarmicDice }) => {
+export const WorldSetup: React.FC<WorldSetupProps> = ({ 
+    onWorldCreated, 
+    karmicDice, 
+    setKarmicDice,
+    permadeath,
+    setPermadeath,
+    humanGm,
+    setHumanGm
+}) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<'random' | 'manual'>('random');
@@ -37,6 +50,33 @@ export const WorldSetup: React.FC<WorldSetupProps> = ({ onWorldCreated, karmicDi
       setLoading(false);
     }
   };
+
+  const ToggleItem = ({ 
+      active, 
+      onToggle, 
+      icon, 
+      label, 
+      colorClass, 
+      description 
+  }: { active: boolean, onToggle: () => void, icon: React.ReactNode, label: string, colorClass: string, description: string }) => (
+      <div className="flex items-center gap-3 bg-slate-900/80 p-3 rounded-lg border border-slate-800 group relative flex-1 min-w-[200px]">
+          <div 
+            onClick={onToggle}
+            className={`w-12 h-6 rounded-full p-1 cursor-pointer transition-colors shrink-0 ${active ? colorClass.replace('text-', 'bg-') : 'bg-slate-600'}`}
+          >
+             <div className={`w-4 h-4 bg-white rounded-full shadow-md transform transition-transform ${active ? 'translate-x-6' : 'translate-x-0'}`}></div>
+          </div>
+          <span className={`text-sm font-bold flex items-center gap-2 cursor-help whitespace-nowrap ${active ? colorClass : 'text-slate-500'}`}>
+             {icon}
+             {label}
+          </span>
+          
+          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 w-64 p-3 bg-slate-800 border border-slate-600 rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 text-xs text-left">
+              <p className="text-slate-300 leading-relaxed">{description}</p>
+              <div className="absolute bottom-[-6px] left-1/2 -translate-x-1/2 w-3 h-3 bg-slate-800 border-b border-r border-slate-600 transform rotate-45"></div>
+          </div>
+      </div>
+  );
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-6 space-y-8 animate-fade-in w-full max-w-4xl mx-auto">
@@ -80,32 +120,34 @@ export const WorldSetup: React.FC<WorldSetupProps> = ({ onWorldCreated, karmicDi
         </div>
       )}
 
-      {/* Karmic Dice Toggle */}
-      <div className="flex items-center gap-3 bg-slate-900/80 p-3 rounded-lg border border-slate-800 group relative">
-          <div 
-            onClick={() => setKarmicDice(!karmicDice)}
-            className={`w-12 h-6 rounded-full p-1 cursor-pointer transition-colors ${karmicDice ? 'bg-purple-600' : 'bg-slate-600'}`}
-          >
-             <div className={`w-4 h-4 bg-white rounded-full shadow-md transform transition-transform ${karmicDice ? 'translate-x-6' : 'translate-x-0'}`}></div>
-          </div>
-          <span className="text-sm font-bold text-slate-300 flex items-center gap-2 cursor-help">
-             <Dices size={16} className={karmicDice ? 'text-purple-400' : 'text-slate-500'}/>
-             Dados Kármicos
-          </span>
+      {/* Settings Grid */}
+      <div className="flex flex-wrap justify-center gap-4 w-full max-w-2xl">
+          <ToggleItem 
+              active={karmicDice} 
+              onToggle={() => setKarmicDice(!karmicDice)}
+              icon={<Dices size={16}/>}
+              label="Dados Kármicos"
+              colorClass="text-purple-400"
+              description="Equilibra a sorte para evitar sequências extremas de falhas ou sucessos."
+          />
           
-          {/* Tooltip */}
-          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 w-80 p-3 bg-slate-800 border border-purple-500/30 rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 text-xs text-left">
-              <h4 className="font-bold text-purple-400 mb-1 flex items-center gap-1"><Info size={12}/> Equilíbrio do Destino</h4>
-              <p className="text-slate-300 leading-relaxed">
-                  Quando ativada, a opção <strong>Dados Kármicos</strong> manipula a aleatoriedade das rolagens para evitar sequências longas de falhas ou sucessos, tanto para o jogador quanto para os inimigos.
-              </p>
-              <ul className="mt-2 space-y-1 text-slate-400">
-                  <li>• Evita azar extremo consecutivos.</li>
-                  <li>• Limita sequências infinitas de críticos.</li>
-                  <li>• Aplica-se a Jogadores e Inimigos.</li>
-              </ul>
-              <div className="absolute bottom-[-6px] left-1/2 -translate-x-1/2 w-3 h-3 bg-slate-800 border-b border-r border-purple-500/30 transform rotate-45"></div>
-          </div>
+          <ToggleItem 
+              active={permadeath} 
+              onToggle={() => setPermadeath(!permadeath)}
+              icon={<Skull size={16}/>}
+              label="Morte Permanente"
+              colorClass="text-red-500"
+              description="Se o HP chegar a 0, o personagem cai. Se não for salvo, morre definitivamente. Sem respawn."
+          />
+
+          <ToggleItem 
+              active={humanGm} 
+              onToggle={() => setHumanGm(!humanGm)}
+              icon={<UserCog size={16}/>}
+              label="GM Humano Auxiliar"
+              colorClass="text-amber-400"
+              description="Habilita uma opção na tela de jogo para você sugerir eventos específicos para a IA narrar."
+          />
       </div>
 
       {error && (
