@@ -8,13 +8,13 @@ interface AudioControllerProps {
   track: MusicTrack;
 }
 
-// URLs atualizadas para usar o redirecionador estável do Archive.org
+// URLs substituídas por Google Cloud Storage (CodeSkulptor assets) para maior estabilidade
 const TRACK_URLS: Record<MusicTrack, string> = {
-  MENU: "https://archive.org/download/ChiptuneSongs/03.Black%20Hole.mp3",
-  EXPLORATION: "https://archive.org/download/ChiptuneSongs/01.A%20Night%20Of%20Dizzy%20Spells.mp3",
-  COMBAT: "https://archive.org/download/ChiptuneSongs/02.TurnTheTide.mp3",
-  VICTORY: "https://archive.org/download/8-bit-music-pack-loopable/Victory%20%28Loopable%29.mp3",
-  DEFEAT: "https://archive.org/download/8-bit-music-pack-loopable/Game%20Over%20%28Loopable%29.mp3"
+  MENU: "https://commondatastorage.googleapis.com/codeskulptor-assets/Epoq-Lepidoptera.ogg",
+  EXPLORATION: "https://commondatastorage.googleapis.com/codeskulptor-demos/pyman_assets/ateapill.ogg",
+  COMBAT: "https://commondatastorage.googleapis.com/codeskulptor-assets/music/race2.ogg",
+  VICTORY: "https://commondatastorage.googleapis.com/codeskulptor-demos/riceracer_assets/music/win.ogg",
+  DEFEAT: "https://commondatastorage.googleapis.com/codeskulptor-demos/pyman_assets/intromusic.ogg"
 };
 
 export const AudioController: React.FC<AudioControllerProps> = ({ track }) => {
@@ -31,7 +31,13 @@ export const AudioController: React.FC<AudioControllerProps> = ({ track }) => {
         
         // Listener global de erro para o elemento de áudio
         audioRef.current.onerror = (e) => {
-            console.error("Erro no player de áudio:", audioRef.current?.error);
+            const err = audioRef.current?.error;
+            const errCode = err?.code;
+            const errMsg = err?.message;
+            const src = audioRef.current?.src;
+            
+            // Formatamos como string para evitar [object Object] em alguns consoles
+            console.error(`Erro no player de áudio. Código: ${errCode}, Mensagem: ${errMsg}, URL: ${src}`);
             setHasError(true);
         };
         
@@ -46,7 +52,9 @@ export const AudioController: React.FC<AudioControllerProps> = ({ track }) => {
     const playMusic = async () => {
         try {
             const trackUrl = TRACK_URLS[track];
-            // Reset erro ao tentar nova faixa
+            // Se já houve erro nesta URL, não tentamos de novo imediatamente para evitar loop,
+            // a menos que a URL tenha mudado (o que é tratado pelo useEffect dependency)
+            
             setHasError(false);
 
             // Apenas altera o source se for diferente para evitar reinício da música
@@ -65,8 +73,7 @@ export const AudioController: React.FC<AudioControllerProps> = ({ track }) => {
                 console.warn("Autoplay bloqueado. Aguardando interação do usuário.");
                 setWaitingForInteraction(true);
             } else {
-                console.error("Erro ao tentar tocar áudio:", e);
-                // Não setamos erro visual aqui imediatamente, deixamos o onerror pegar falhas de source
+                console.error(`Erro ao tentar tocar áudio: ${e.message || e}`);
             }
         }
     };
@@ -115,7 +122,7 @@ export const AudioController: React.FC<AudioControllerProps> = ({ track }) => {
     <div className="fixed bottom-4 right-4 z-50 bg-slate-900/90 border border-slate-700 p-2 rounded-lg shadow-xl flex items-center gap-3 backdrop-blur-sm animate-fade-in group transition-all hover:bg-slate-900">
       <div className="flex flex-col">
           <span className="text-[8px] font-bold text-amber-500 uppercase tracking-widest mb-1 flex items-center gap-1">
-            <Music size={8} /> 8-Bit Audio
+            <Music size={8} /> Ambiente
           </span>
           <div className="flex items-center gap-2">
             <button 

@@ -11,6 +11,7 @@ export interface WorldData {
   themes: string[];
   coreConflict: string;
   mainObjective: string;
+  currencyName: string; // Nome da moeda (Ouro, Tampinhas, Créditos, Ração)
 }
 
 export interface Skill {
@@ -47,6 +48,7 @@ export interface Item {
   type?: 'consumable' | 'equipment' | 'misc'; // Classification for UI actions
   slot?: EquipmentSlot; // If defined, it can be equipped
   capacityBonus?: number; // Only for 'back' items (backpacks)
+  price?: number; // Preço para comércio
 }
 
 export interface StatusEffect {
@@ -69,6 +71,7 @@ export interface Character {
   items: Item[];
   equipment: Partial<Record<EquipmentSlot, Item>>; // Equipped items do not count towards inventory limit
   status?: StatusEffect[];
+  wealth: number; // Dinheiro atual
 }
 
 export interface Enemy {
@@ -85,7 +88,6 @@ export interface Enemy {
   status?: StatusEffect[];
 }
 
-// Interface idêntica a Enemy, mas semanticamente diferente para a UI
 export interface Ally {
   id: string;
   name: string;
@@ -97,6 +99,26 @@ export interface Ally {
   currentStamina: number;  
   maxStamina: number;      
   status?: StatusEffect[];
+}
+
+export interface NeutralNPC {
+  id: string;
+  name: string;
+  description: string;
+  role: 'Merchant' | 'Civilian' | 'Animal' | 'Other';
+  currentHp: number;
+  maxHp: number;
+  status?: StatusEffect[];
+  isMerchant: boolean;
+  shopItems?: Item[]; // Inventário para venda se for mercador
+}
+
+export type TimePhase = 'DAWN' | 'DAY' | 'DUSK' | 'NIGHT';
+
+export interface TimeData {
+  dayCount: number;
+  phase: TimePhase;
+  description: string; // Ex: "Final de tarde chuvoso", "Madrugada fria"
 }
 
 export interface NarrativeTurn {
@@ -140,6 +162,7 @@ export interface InventoryUpdate {
   characterName: string;
   item: Item;
   action: 'ADD' | 'REMOVE';
+  cost?: number; // Custo se houve transação
 }
 
 export interface MapData {
@@ -158,7 +181,9 @@ export interface TurnResponse {
   inventoryUpdates: InventoryUpdate[];
   characterStatusUpdates?: CharacterStatusUpdate[];
   activeEnemies: Enemy[]; // Lista atualizada de inimigos na cena
-  activeAllies: Ally[];   // Novo: Lista de aliados controlados pelo GM
-  nearbyItems: Item[];    // Novo: Itens encontrados no chão/ambiente
-  mapData?: MapData; 
+  activeAllies: Ally[];   // Lista de aliados controlados pelo GM
+  activeNeutrals: NeutralNPC[]; // Nova lista de NPCs neutros/mercadores
+  nearbyItems: Item[];    // Itens encontrados no chão/ambiente
+  mapData?: MapData;
+  timeData: TimeData; // Atualização do tempo
 }

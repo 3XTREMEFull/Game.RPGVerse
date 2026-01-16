@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { WorldData, Character, Skill, Attributes, DerivedStats, Item } from '../types';
 import { generateCharacterDetails } from '../services/geminiService';
 import { Button } from './Button';
-import { UserPlus, Shield, Zap, Heart, Trash2, Stars, CheckCircle, Dna, Activity, Target, Flame, Droplets, Backpack } from 'lucide-react';
+import { UserPlus, Shield, Zap, Heart, Trash2, Stars, CheckCircle, Dna, Activity, Target, Flame, Droplets, Backpack, Coins } from 'lucide-react';
 
 interface CharacterCreationProps {
   world: WorldData;
@@ -19,6 +19,7 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({ world, onC
   const [generatedAttributes, setGeneratedAttributes] = useState<Attributes | null>(null);
   const [generatedDerived, setGeneratedDerived] = useState<DerivedStats | null>(null);
   const [generatedItems, setGeneratedItems] = useState<Item[]>([]);
+  const [generatedWealth, setGeneratedWealth] = useState<number>(0);
   
   const [selectedSkills, setSelectedSkills] = useState<Skill[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -41,6 +42,7 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({ world, onC
     setGeneratedAttributes(null);
     setGeneratedDerived(null);
     setGeneratedItems([]);
+    setGeneratedWealth(0);
 
     try {
       const details = await generateCharacterDetails(world, formData.concept);
@@ -49,6 +51,7 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({ world, onC
       setGeneratedAttributes(details.attributes);
       setGeneratedDerived(details.derived);
       setGeneratedItems(details.startingItems);
+      setGeneratedWealth(details.wealth);
       // Auto-select first 2 skills for convenience, but allow change
       setSelectedSkills(details.skills.slice(0, 2));
     } catch (err) {
@@ -82,7 +85,8 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({ world, onC
       attributes: generatedAttributes,
       derived: generatedDerived,
       items: generatedItems,
-      equipment: {} // Initialize equipment
+      equipment: {}, // Initialize equipment
+      wealth: generatedWealth
     };
 
     setCharacters([...characters, newChar]);
@@ -92,6 +96,7 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({ world, onC
     setGeneratedAttributes(null);
     setGeneratedDerived(null);
     setGeneratedItems([]);
+    setGeneratedWealth(0);
   };
 
   const removeCharacter = (id: string) => {
@@ -195,8 +200,8 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({ world, onC
                       <AttributeDisplay label="SOR" value={generatedAttributes.SOR} />
                     </div>
                     
-                    {/* Derived Stats */}
-                    <div className="grid grid-cols-3 gap-4 bg-slate-900/80 p-3 rounded border border-slate-700">
+                    {/* Derived Stats & Wealth */}
+                    <div className="grid grid-cols-4 gap-4 bg-slate-900/80 p-3 rounded border border-slate-700">
                         <div className="flex flex-col items-center">
                             <span className="text-xs text-red-400 font-bold flex items-center gap-1"><Heart size={12}/> VIDA</span>
                             <span className="text-lg font-cinzel text-white">{generatedDerived.hp}</span>
@@ -208,6 +213,10 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({ world, onC
                         <div className="flex flex-col items-center border-l border-slate-700">
                             <span className="text-xs text-green-400 font-bold flex items-center gap-1"><Flame size={12}/> ESTAMINA</span>
                             <span className="text-lg font-cinzel text-white">{generatedDerived.stamina}</span>
+                        </div>
+                        <div className="flex flex-col items-center border-l border-slate-700">
+                            <span className="text-xs text-amber-400 font-bold flex items-center gap-1"><Coins size={12}/> $</span>
+                            <span className="text-lg font-cinzel text-white">{generatedWealth}</span>
                         </div>
                     </div>
 
@@ -265,6 +274,7 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({ world, onC
                           setGeneratedAttributes(null);
                           setGeneratedDerived(null); 
                           setGeneratedItems([]);
+                          setGeneratedWealth(0);
                       }}
                       className="text-xs text-slate-500 hover:text-slate-300 underline w-full text-center"
                     >
@@ -340,8 +350,15 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({ world, onC
                 >
                   <Trash2 size={16} />
                 </button>
-                <h4 className="font-bold text-amber-100 text-lg">{char.name}</h4>
-                <p className="text-xs text-amber-500/80 uppercase tracking-wide mb-3">{char.concept}</p>
+                <div className="flex justify-between items-start">
+                    <div>
+                        <h4 className="font-bold text-amber-100 text-lg">{char.name}</h4>
+                        <p className="text-xs text-amber-500/80 uppercase tracking-wide mb-3">{char.concept}</p>
+                    </div>
+                    <div className="bg-black/30 px-2 py-1 rounded text-amber-400 font-bold text-xs flex items-center gap-1 border border-amber-900/50">
+                        <Coins size={12} /> {char.wealth}
+                    </div>
+                </div>
                 
                 <div className="grid grid-cols-4 gap-1 mb-3 bg-slate-900/50 p-2 rounded">
                     {Object.entries(char.attributes).map(([key, val]) => (

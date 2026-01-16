@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type, Schema } from "@google/genai";
-import { WorldData, Character, NarrativeTurn, Skill, Attributes, RollResult, TurnResponse, DerivedStats, ResourceChange, Item, Enemy, MapData, StatusEffect, CharacterStatusUpdate, Ally } from "../types";
+import { WorldData, Character, NarrativeTurn, Skill, Attributes, RollResult, TurnResponse, DerivedStats, ResourceChange, Item, Enemy, MapData, StatusEffect, CharacterStatusUpdate, Ally, TimeData, NeutralNPC } from "../types";
 
 const API_KEY = process.env.API_KEY || '';
 
@@ -42,83 +42,46 @@ const SYSTEM_INSTRUCTION = `
 Você é o Mestre de Jogo (GM) para um RPG textual colaborativo.
 
 Seu papel é:
-1. Definir o cenário e temas.
-2. Gerenciar a história e o OBJETIVO FINAL.
+1. Definir o cenário, temas e a MOEDA DO MUNDO (Ouro, Créditos, Comida, etc).
+2. Gerenciar a história, o OBJETIVO FINAL e o TEMPO (Ciclo Dia/Noite).
 3. Adjudicar ações usando o SISTEMA DE REGRAS ESPECÍFICO abaixo.
 4. Responda SEMPRE em Português do Brasil (pt-BR).
 
-=== DIRETRIZES DE NARRATIVA (ALTA PRIORIDADE) ===
-- **ESTILO LITERÁRIO**: Não seja breve. Escreva descrições ricas, atmosféricas e detalhadas. Use metáforas e descreva os sentidos (cheiros, sons, luzes).
-- **RITMO VARIADO**: Não force combate a todo turno. Permita cenas de exploração, mistério, interação social e introspecção.
-- **FOCO NO ENREDO**: Avance a trama principal e as subtramas dos personagens. Use ganchos narrativos baseados nas Motivações dos personagens.
+=== DIRETRIZES DE NARRATIVA E TEMPO ===
+- **CICLO DIA/NOITE**: Você DEVE manter a continuidade do tempo. Se a cena anterior foi à tarde e eles viajaram, agora pode ser noite. Retorne sempre o objeto 'timeData'.
+- **ESTILO LITERÁRIO**: Não seja breve. Escreva descrições ricas, atmosféricas e detalhadas.
+- **RITMO VARIADO**: Não force combate a todo turno. Permita cenas de exploração e comércio.
 
 === SISTEMA DE REGRAS (IMUTÁVEL) ===
-ATRIBUTOS (Escala 1-10):
-- FOR (Força), DES (Destreza), CON (Constituição), INT (Inteligência), SAB (Sabedoria), CAR (Carisma), AGI (Agilidade), SOR (Sorte).
-- Modificador = Atributo - 2.
-
-AVALIAÇÃO DE DIFICULDADE (DC):
-- DC 8 (Muito Fácil) a DC 22 (Lendária).
+ATRIBUTOS (Escala 1-10): FOR, DES, CON, INT, SAB, CAR, AGI, SOR. Modificador = Atributo - 2.
 
 **IMPORTANTE: SLOT 'MÃOS' (hands)**:
-  - Se o jogador atacar ou agir usando o item equipado no slot 'hands', você DEVE:
-    1. **NARRATIVA**: Descrever explicitamente o uso daquele item (ex: "Você dispara sua Pistola M9...", "Você brande seu Machado...").
-    2. **MECÂNICA**: Aplicar AUTOMATICAMENTE o 'effect' do item ao resultado. Se o item diz "+2 em ataque", some +2 mentalmente ao dado do jogador para definir o sucesso. Se diz "+1d4 dano de fogo", aplique esse dano extra na resolução.
-  - Não pergunte se ele quer usar. Se está equipado e a ação é compatível (ex: Ataque), assuma o uso.
+  - Se o jogador atacar com item equipado, aplique bônus mecânicos automaticamente.
 
-
-COMBATE, INIMIGOS E ALIADOS:
-- Defina HP baseado na dificuldade (Minion: 10-20, Elite: 40-80, Boss: 150+).
-- **USO OBRIGATÓRIO DE DADOS DE INIMIGOS**
+COMBATE, INIMIGOS, ALIADOS E NEUTROS:
+- Inimigos (Vermelho): Hostis.
+- Aliados (Azul): Amigos/Pets que lutam.
+- **Neutros (Amarelo)**: Mercadores, Animais passivos, Civis. Use a lista 'activeNeutrals'.
+  - **MERCADORES**: Se houver um mercador, defina 'isMerchant: true' e preencha 'shopItems' com itens e PREÇOS ('price') adequados à economia do mundo.
 
 RECURSOS & MATEMÁTICA (CRÍTICO):
-- **REGRA DE SINAL**: Para DANO ou CUSTO, você DEVE usar valores **NEGATIVOS** (ex: -10 HP, -5 Mana). Para CURA ou RECUPERAÇÃO, use valores POSITIVOS (ex: +5 HP).
+- **REGRA DE SINAL**: Dano/Custo = NEGATIVO. Cura/Ganho = POSITIVO.
 
-
-LOOT & ITENS E EQUIPAMENTOS:
-- **CLASSIFICAÇÃO DE ITENS**:
-  - Use o campo 'type' para definir o tipo de item: 'consumable' (poções, comida), 'equipment' (armas, roupas) ou 'misc'.
-- **SLOTS DE EQUIPAMENTO**:
-  - 'hands': Armas, Varinhas, Escudos, Ferramentas. (ESTE É O SLOT PRINCIPAL DE ATAQUE).
-  - 'back': Mochilas.
-  - 'chest': Armaduras, Roupas.
-- Ao gerar itens iniciais, garanta que pelo menos um seja uma ARMA ou FERRAMENTA para o slot 'hands' com um efeito mecânico claro (ex: "Faca Curta", effect: "+1 em rolagens de acerto").
+LOOT & COMÉRCIO:
+- **REGRA DE LOOT (SORTE)**: Ao saquear, role 1d20 + SOR ocultamente para definir a qualidade.
+- **ECONOMIA**: Os preços devem fazer sentido com a moeda definida no 'WorldData'.
 
 MAPA & NAVEGAÇÃO:
 - O mapa é uma grade 5x5 representando a REGIÃO IMEDIATA.
-- Use Emojis para Personagens (👤), Inimigos (👹) e Aliados (🛡️).
+- Use Emojis: Personagens (👤), Inimigos (👹), Aliados (🛡️), Neutros/Mercadores (💰).
+- **O MAPA É OBRIGATÓRIO EM TODOS OS TURNOS**.
 
 1. PRINCÍPIO FUNDAMENTAL: UNIVERSALIDADE DAS REGRAS
-• Regra Obrigatória: Todas as regras de dados e mecânicas descritas aplicam-se de forma absolutamente igual a todas as entidades do jogo: Personagens Jogáveis (PJs), Inimigos (NPCs Hostis) e Aliados (NPCs Amigáveis).
-• Objetivo: Garantir justiça e consistência.
+• Regra Obrigatória: Todas as regras de dados e mecânicas descritas aplicam-se de forma absolutamente igual a todas as entidades do jogo.
 
 2. SISTEMA DE ROLAGEM AUTOMÁTICA E SEPARAÇÃO
-• Ação: Você deve executar internamente todas as rolagens necessárias para o jogo (especialmente para Inimigos e Aliados).
-• Para os Jogadores, use o resultado do dado fornecido no prompt (D20), mas calcule os bônus internamente.
-• PROIBIDO: Incluir números de dados, resultados brutos, CDs ou cálculos no texto narrativo principal ('storyText').
-• Processo:
-  1. Decisão Interna: Decida qual dado e bônus usar.
-  2. Rolagem/Cálculo Interno.
-  3. Registro no Log: Gere uma entrada detalhada no array 'systemLogs'.
-  4. Narração Limpa: Produza uma descrição puramente literária no 'storyText'.
-
-3. LÓGICA DE DADOS (UNIVERSAL)
-• Testes (Ataque, Habilidade, Resistência): Base D20. Sucesso = (d20 + bônus) >= DC.
-• Dano/Cura: d4 (menor), d6 (comum), d8 (versátil), d10/d12 (pesado).
-
-4. FORMATO OBRIGATÓRIO DO REGISTRO NO LOG ('systemLogs')
-• Cada entrada no array deve seguir estritamente este formato string:
-"[SISTEMA] [Entidade/Ação]: [Resultado Total] em [Tipo de Dado] + [Bônus] (Alvo: [CD] ou 'Dano/Cura'). [STATUS]"
-• Exemplos:
-  - "[SISTEMA] Ataque do Herói (Espada): 18 em d20 + 5 (Alvo: Defesa 15). SUCESSO."
-  - "[SISTEMA] Dano do Orc (Machado): 7 em d8 + 3 (Alvo: Dano)."
-
-5. COMBATE & RECURSOS
-• Use valores NEGATIVOS para Dano/Perda (-10) e POSITIVOS para Cura (+5) em 'resourceChanges'.
-• Item 'hands': Se o jogador atacar, verifique o item equipado em 'hands'. Aplique seu efeito mecânico automaticamente e narre seu uso.
-
-6. ESTRUTURA
-• Responda SEMPRE em Português do Brasil (pt-BR).
+• Ação: Você deve executar internamente todas as rolagens necessárias para o jogo.
+• Processo: Decisão Interna -> Rolagem -> Log em 'systemLogs' -> Narração em 'storyText'.
 `;
 
 const MODEL_NAME = "gemini-3-flash-preview";
@@ -130,15 +93,16 @@ export const generateWorldPremise = async (manualInput?: string): Promise<WorldD
       premise: { type: Type.STRING, description: "A detailed setting description." },
       themes: { type: Type.ARRAY, items: { type: Type.STRING }, description: "3-5 themes or tonal keywords." },
       coreConflict: { type: Type.STRING, description: "The starting point of the story and main conflict." },
-      mainObjective: { type: Type.STRING, description: "The specific final goal players must achieve to win the campaign." }
+      mainObjective: { type: Type.STRING, description: "The specific final goal players must achieve to win the campaign." },
+      currencyName: { type: Type.STRING, description: "Nome da moeda principal (Ex: Peças de Ouro, Créditos Imperiais, Ração, Tampinhas)." }
     },
-    required: ["premise", "themes", "coreConflict", "mainObjective"]
+    required: ["premise", "themes", "coreConflict", "mainObjective", "currencyName"]
   };
 
-  let prompt = "Crie uma premissa de mundo de RPG única, temas, um conflito central e um OBJETIVO FINAL CLARO. Seja criativo e detalhista.";
+  let prompt = "Crie uma premissa de mundo de RPG única, temas, um conflito central, um OBJETIVO FINAL CLARO e defina a MOEDA utilizada. Seja criativo.";
   
   if (manualInput) {
-    prompt = `Com base na seguinte ideia do usuário: "${manualInput}", expanda e crie uma premissa detalhada, temas, conflito e um OBJETIVO FINAL claro.`;
+    prompt = `Com base na seguinte ideia do usuário: "${manualInput}", expanda e crie uma premissa detalhada, temas, conflito, OBJETIVO FINAL e defina a MOEDA adequada ao cenário.`;
   }
 
   return callWithRetry(async () => {
@@ -157,7 +121,7 @@ export const generateWorldPremise = async (manualInput?: string): Promise<WorldD
   });
 };
 
-export const generateCharacterDetails = async (world: WorldData, characterConcept: string): Promise<{ skills: Skill[], attributes: Attributes, derived: DerivedStats, startingItems: Item[] }> => {
+export const generateCharacterDetails = async (world: WorldData, characterConcept: string): Promise<{ skills: Skill[], attributes: Attributes, derived: DerivedStats, startingItems: Item[], wealth: number }> => {
   const schema: Schema = {
     type: Type.OBJECT,
     properties: {
@@ -202,20 +166,20 @@ export const generateCharacterDetails = async (world: WorldData, characterConcep
           },
           required: ["name", "description", "effect", "type"]
         }
-      }
+      },
+      wealth: { type: Type.INTEGER, description: `Quantidade inicial de ${world.currencyName}` }
     },
-    required: ["skills", "attributes", "startingItems"]
+    required: ["skills", "attributes", "startingItems", "wealth"]
   };
 
   const prompt = `
   Mundo: ${world.premise}
+  Moeda: ${world.currencyName}
   Conceito do Personagem: ${characterConcept}
   
-  Gere atributos equilibrados (1-5), 4 habilidades temáticas e 3 itens iniciais.
+  Gere atributos equilibrados (1-5), 4 habilidades temáticas, 3 itens iniciais e o dinheiro inicial (${world.currencyName}) apropriado para o status do personagem.
   IMPORTANTE:
-  - Gere pelo menos 1 item com slot='hands' (uma arma ou ferramenta principal para o conceito).
-  - No campo 'effect' deste item, coloque um bônus mecânico claro (Ex: "+2 Acerto", "Dano +1d6").
-  - Se o personagem tiver uma mochila, defina slot='back' e capacityBonus.
+  - Gere pelo menos 1 item com slot='hands'.
   `;
 
   return callWithRetry(async () => {
@@ -231,7 +195,7 @@ export const generateCharacterDetails = async (world: WorldData, characterConcep
 
     if (!response.text) throw new Error("Resposta vazia da IA");
 
-    const data = JSON.parse(response.text) as { skills: Skill[], attributes: Attributes, startingItems: Item[] };
+    const data = JSON.parse(response.text) as { skills: Skill[], attributes: Attributes, startingItems: Item[], wealth: number };
     
     const derived: DerivedStats = {
       hp: 10 + (data.attributes.CON * 5),
@@ -243,13 +207,15 @@ export const generateCharacterDetails = async (world: WorldData, characterConcep
   });
 };
 
-export const startNarrative = async (world: WorldData, characters: Character[]): Promise<{ storyText: string; activeEnemies: Enemy[]; activeAllies: Ally[]; mapData: MapData }> => {
+export const startNarrative = async (world: WorldData, characters: Character[]): Promise<{ storyText: string; activeEnemies: Enemy[]; activeAllies: Ally[]; activeNeutrals: NeutralNPC[]; mapData: MapData; timeData: TimeData }> => {
   const characterDescriptions = characters.map(c => `- ${c.name} (${c.concept})`).join('\n');
 
   const schema: Schema = {
     type: Type.OBJECT,
     properties: {
-        storyText: { type: Type.STRING, description: "A descrição longa e imersiva da cena inicial." },
+        storyText: { type: Type.STRING },
+        // CORREÇÃO: Definimos as propriedades completas de Enemy, Ally e NeutralNPC para validar o schema,
+        // mas instruímos via prompt a retornar listas vazias ou populadas conforme a lógica.
         activeEnemies: {
             type: Type.ARRAY,
             items: {
@@ -287,34 +253,57 @@ export const startNarrative = async (world: WorldData, characters: Character[]):
                 required: ["id", "name", "description", "currentHp", "maxHp", "currentMana", "maxMana", "currentStamina", "maxStamina"]
             }
         },
+        activeNeutrals: {
+            type: Type.ARRAY,
+            items: {
+                type: Type.OBJECT,
+                properties: {
+                    id: { type: Type.STRING },
+                    name: { type: Type.STRING },
+                    description: { type: Type.STRING },
+                    role: { type: Type.STRING, enum: ['Merchant', 'Civilian', 'Animal', 'Other'] },
+                    currentHp: { type: Type.INTEGER },
+                    maxHp: { type: Type.INTEGER },
+                    isMerchant: { type: Type.BOOLEAN },
+                    shopItems: {
+                        type: Type.ARRAY,
+                        items: {
+                            type: Type.OBJECT,
+                            properties: {
+                                name: { type: Type.STRING },
+                                description: { type: Type.STRING },
+                                effect: { type: Type.STRING },
+                                type: { type: Type.STRING, enum: ['consumable', 'equipment', 'misc'] },
+                                slot: { type: Type.STRING, enum: ['back', 'chest', 'hands'] },
+                                price: { type: Type.INTEGER }
+                            },
+                            required: ["name", "description", "effect", "type", "price"]
+                        }
+                    }
+                },
+                required: ["id", "name", "description", "role", "currentHp", "maxHp", "isMerchant"]
+            }
+        },
         mapData: {
             type: Type.OBJECT,
             properties: {
                 locationName: { type: Type.STRING },
-                grid: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.ARRAY,
-                        items: { type: Type.STRING }
-                    },
-                    description: "5x5 grid array. Use '.' for empty road/terrain, and Emojis for POIs/Actors."
-                },
-                legend: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            symbol: { type: Type.STRING },
-                            description: { type: Type.STRING }
-                        },
-                        required: ["symbol", "description"]
-                    }
-                }
+                grid: { type: Type.ARRAY, items: { type: Type.ARRAY, items: { type: Type.STRING } } },
+                legend: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { symbol: { type: Type.STRING }, description: { type: Type.STRING } }, required: ["symbol", "description"] } }
             },
             required: ["locationName", "grid", "legend"]
+        },
+        timeData: {
+            type: Type.OBJECT,
+            properties: {
+                dayCount: { type: Type.INTEGER },
+                phase: { type: Type.STRING, enum: ['DAWN', 'DAY', 'DUSK', 'NIGHT'] },
+                description: { type: Type.STRING }
+            },
+            required: ["dayCount", "phase", "description"]
         }
     },
-    required: ["storyText", "activeEnemies", "activeAllies", "mapData"]
+    required: ["storyText", "activeEnemies", "activeAllies", "activeNeutrals", "mapData", "timeData"]
   };
 
   const prompt = `
@@ -322,14 +311,12 @@ export const startNarrative = async (world: WorldData, characters: Character[]):
   ${characterDescriptions}
 
   Mundo: ${world.premise}
-  Conflito: ${world.coreConflict}
+  Moeda: ${world.currencyName}
 
-  Escreva uma introdução longa e atmosférica. Estabeleça o cenário com detalhes sensoriais.
-  Se houver perigo imediato, gere inimigos. 
-  
-  **CORREÇÃO DE ALIADOS**: Analise os backgrounds e conexões dos personagens. Se eles tiverem aliados lógicos presentes na cena (ex: pets, escudeiros, NPCs da história), você DEVE gerá-los e colocá-los na lista 'activeAllies'.
-
-  IMPORTANTE: Gere o mapa (mapData) correspondente à cena inicial com Locais de Interesse (POIs) e a posição inicial dos personagens.
+  Escreva a introdução. Defina o Horário Inicial (timeData).
+  **REGRA DA PRIMEIRA CENA**: A lista 'activeEnemies' DEVE SER VAZIA []. Não gere inimigos agora.
+  **NEUTROS**: Gere NPCs neutros/mercadores se fizer sentido para a cena (Ex: uma praça de mercado).
+  **MAPA**: Gere um 'mapData' 5x5 completo e válido.
   `;
 
   return callWithRetry(async () => {
@@ -344,7 +331,7 @@ export const startNarrative = async (world: WorldData, characters: Character[]):
     });
 
     if (!response.text) throw new Error("Resposta vazia da IA");
-    return JSON.parse(response.text) as { storyText: string; activeEnemies: Enemy[]; activeAllies: Ally[]; mapData: MapData };
+    return JSON.parse(response.text) as { storyText: string; activeEnemies: Enemy[]; activeAllies: Ally[]; activeNeutrals: NeutralNPC[]; mapData: MapData; timeData: TimeData };
   });
 };
 
@@ -356,7 +343,8 @@ export const processTurn = async (
   world: WorldData,
   currentEnemies: Enemy[],
   currentAllies: Ally[] = [],
-  // Removido enemyRolls do cliente. A IA rola internamente.
+  currentNeutrals: NeutralNPC[] = [],
+  currentTime?: TimeData
 ): Promise<TurnResponse> => {
   const context = history.map(h => {
       if (h.role === 'system') return `[SISTEMA]: ${h.content}`;
@@ -373,242 +361,98 @@ export const processTurn = async (
     
     const handsItem = char.equipment?.hands;
     const handsInfo = handsItem 
-        ? `[ITEM EQUIPADO NAS MÃOS (ARMA PRINCIPAL): "${handsItem.name}". EFEITO MECÂNICO: "${handsItem.effect}". NARRATIVA: Use este item para descrever a ação se for um ataque/uso de ferramenta.]` 
+        ? `[ITEM: "${handsItem.name}". EFEITO: "${handsItem.effect}"]` 
         : "[MÃOS VAZIAS]";
     
-    const otherEquipment = `Outros Equipamentos: ${JSON.stringify({ chest: char.equipment?.chest, back: char.equipment?.back })}`;
-
-    return `PERSONAGEM: ${p.name}\n- AÇÃO DECLARADA: "${p.action}"\n- ROLAGEM DO JOGADOR: ${roll.type}(${roll.value}) (Aplique os bônus internamente)\n- ${handsInfo}\n- STATS: ${stats}\n- RECURSOS: ${derived}\n- ${otherEquipment}`;
+    return `PERSONAGEM: ${p.name}\n- AÇÃO: "${p.action}"\n- DADO: ${roll.type}(${roll.value})\n- ${handsInfo}\n- STATS: ${stats}\n- DINHEIRO: ${char.wealth} ${world.currencyName}`;
   }).join('\n\n');
 
   const enemyContext = currentEnemies.length > 0 
-    ? `INIMIGOS ATIVOS (IA CONTROLA E ROLA DADOS INTERNAMENTE):
-       ${currentEnemies.map(e => {
-           return `- ${e.name} (${e.difficulty}, HP:${e.currentHp}, MP:${e.currentMana}, ST:${e.currentStamina})`;
-       }).join('\n')}`
-    : "NENHUM INIMIGO ATIVO.";
+    ? `INIMIGOS ATIVOS: ${currentEnemies.map(e => `- ${e.name} (${e.difficulty}, HP:${e.currentHp})`).join('\n')}`
+    : "NENHUM INIMIGO.";
 
-  const allyContext = currentAllies.length > 0
-    ? `ALIADOS ATIVOS (IA CONTROLA E ROLA DADOS INTERNAMENTE):
-       ${currentAllies.map(a => `- ${a.name} (HP: ${a.currentHp}, MP: ${a.currentMana})`).join('\n')}`
-    : "NENHUM ALIADO ATIVO.";
+  const neutralContext = currentNeutrals.length > 0
+    ? `NEUTROS ATIVOS: ${currentNeutrals.map(n => `- ${n.name} (${n.role}, Merchant:${n.isMerchant})`).join('\n')}`
+    : "NENHUM NEUTRO.";
+
+  const timeContext = currentTime 
+    ? `TEMPO ATUAL: Dia ${currentTime.dayCount}, Fase: ${currentTime.phase} (${currentTime.description}).`
+    : "TEMPO: Inicio.";
 
   const schema: Schema = {
     type: Type.OBJECT,
     properties: {
-      storyText: { type: Type.STRING, description: "Narrativa literária pura. SEM NÚMEROS DE DADOS, SEM CDs." },
-      systemLogs: { 
-        type: Type.ARRAY, 
-        items: { type: Type.STRING }, 
-        description: "Lista de strings formatadas: '[SISTEMA] [Ação]: [Resultado]...'. OBRIGATÓRIO para todas as rolagens." 
-      },
+      storyText: { type: Type.STRING },
+      systemLogs: { type: Type.ARRAY, items: { type: Type.STRING } },
       isGameOver: { type: Type.BOOLEAN },
       gameResult: { type: Type.STRING, enum: ["VICTORY", "DEFEAT", "ONGOING"] },
-      attributeChanges: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: {
-            characterName: { type: Type.STRING },
-            attribute: { type: Type.STRING },
-            value: { type: Type.INTEGER },
-            reason: { type: Type.STRING }
-          },
-          required: ["characterName", "attribute", "value", "reason"]
-        }
-      },
-      resourceChanges: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: {
-            characterName: { type: Type.STRING },
-            resource: { type: Type.STRING },
-            value: { type: Type.INTEGER, description: "Negativo para dano, positivo para cura." },
-            reason: { type: Type.STRING }
-          },
-          required: ["characterName", "resource", "value", "reason"]
-        }
-      },
-      characterStatusUpdates: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: {
-            characterName: { type: Type.STRING },
-            status: {
-              type: Type.ARRAY,
-              items: {
+      attributeChanges: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { characterName: { type: Type.STRING }, attribute: { type: Type.STRING }, value: { type: Type.INTEGER }, reason: { type: Type.STRING } }, required: ["characterName", "attribute", "value", "reason"] } },
+      resourceChanges: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { characterName: { type: Type.STRING }, resource: { type: Type.STRING }, value: { type: Type.INTEGER }, reason: { type: Type.STRING } }, required: ["characterName", "resource", "value", "reason"] } },
+      characterStatusUpdates: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { characterName: { type: Type.STRING }, status: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, description: { type: Type.STRING }, duration: { type: Type.INTEGER } }, required: ["name", "description", "duration"] } } }, required: ["characterName", "status"] } },
+      inventoryUpdates: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { characterName: { type: Type.STRING }, action: { type: Type.STRING }, cost: { type: Type.INTEGER }, item: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, description: { type: Type.STRING }, effect: { type: Type.STRING }, type: { type: Type.STRING }, slot: { type: Type.STRING }, price: { type: Type.INTEGER } }, required: ["name", "description", "effect", "type"] } }, required: ["characterName", "action", "item"] } },
+      activeEnemies: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { id: { type: Type.STRING }, name: { type: Type.STRING }, description: { type: Type.STRING }, currentHp: { type: Type.INTEGER }, maxHp: { type: Type.INTEGER }, currentMana: { type: Type.INTEGER }, maxMana: { type: Type.INTEGER }, currentStamina: { type: Type.INTEGER }, maxStamina: { type: Type.INTEGER }, difficulty: { type: Type.STRING }, status: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, description: { type: Type.STRING }, duration: { type: Type.INTEGER } }, required: ["name", "description", "duration"] } } }, required: ["id", "name", "description", "currentHp", "maxHp", "difficulty"] } },
+      activeAllies: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { id: { type: Type.STRING }, name: { type: Type.STRING }, description: { type: Type.STRING }, currentHp: { type: Type.INTEGER }, maxHp: { type: Type.INTEGER }, currentMana: { type: Type.INTEGER }, maxMana: { type: Type.INTEGER }, currentStamina: { type: Type.INTEGER }, maxStamina: { type: Type.INTEGER }, status: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, description: { type: Type.STRING }, duration: { type: Type.INTEGER } }, required: ["name", "description", "duration"] } } }, required: ["id", "name", "description", "currentHp", "maxHp"] } },
+      activeNeutrals: {
+            type: Type.ARRAY,
+            items: {
                 type: Type.OBJECT,
                 properties: {
-                  name: { type: Type.STRING },
-                  description: { type: Type.STRING },
-                  duration: { type: Type.INTEGER }
-                },
-                required: ["name", "description", "duration"]
-              }
-            }
-          },
-          required: ["characterName", "status"]
-        }
-      },
-      inventoryUpdates: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: {
-            characterName: { type: Type.STRING },
-            action: { type: Type.STRING, enum: ["ADD", "REMOVE"] },
-            item: {
-                type: Type.OBJECT,
-                properties: {
+                    id: { type: Type.STRING },
                     name: { type: Type.STRING },
                     description: { type: Type.STRING },
-                    effect: { type: Type.STRING },
-                    type: { type: Type.STRING, enum: ['consumable', 'equipment', 'misc'] },
-                    slot: { type: Type.STRING, enum: ['back', 'chest', 'hands'] },
-                    capacityBonus: { type: Type.INTEGER }
-                },
-                required: ["name", "description", "effect", "type"]
-            }
-          },
-          required: ["characterName", "action", "item"]
-        }
-      },
-      activeEnemies: {
-        type: Type.ARRAY,
-        items: {
-            type: Type.OBJECT,
-            properties: {
-                id: { type: Type.STRING },
-                name: { type: Type.STRING },
-                description: { type: Type.STRING },
-                currentHp: { type: Type.INTEGER },
-                maxHp: { type: Type.INTEGER },
-                currentMana: { type: Type.INTEGER },
-                maxMana: { type: Type.INTEGER },
-                currentStamina: { type: Type.INTEGER },
-                maxStamina: { type: Type.INTEGER },
-                difficulty: { type: Type.STRING, enum: ["Minion", "Elite", "Boss"] },
-                status: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            name: { type: Type.STRING },
-                            description: { type: Type.STRING },
-                            duration: { type: Type.INTEGER }
-                        },
-                        required: ["name", "description", "duration"]
-                    }
-                }
-            },
-            required: ["id", "name", "description", "currentHp", "maxHp", "currentMana", "maxMana", "currentStamina", "maxStamina", "difficulty"]
-        }
-      },
-      activeAllies: {
-        type: Type.ARRAY,
-        items: {
-            type: Type.OBJECT,
-            properties: {
-                id: { type: Type.STRING },
-                name: { type: Type.STRING },
-                description: { type: Type.STRING },
-                currentHp: { type: Type.INTEGER },
-                maxHp: { type: Type.INTEGER },
-                currentMana: { type: Type.INTEGER },
-                maxMana: { type: Type.INTEGER },
-                currentStamina: { type: Type.INTEGER },
-                maxStamina: { type: Type.INTEGER },
-                status: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            name: { type: Type.STRING },
-                            description: { type: Type.STRING },
-                            duration: { type: Type.INTEGER }
-                        },
-                        required: ["name", "description", "duration"]
-                    }
-                }
-            },
-            required: ["id", "name", "description", "currentHp", "maxHp", "currentMana", "maxMana", "currentStamina", "maxStamina"]
-        }
-      },
-      nearbyItems: {
-        type: Type.ARRAY,
-        items: {
-            type: Type.OBJECT,
-            properties: {
-                name: { type: Type.STRING },
-                description: { type: Type.STRING },
-                effect: { type: Type.STRING },
-                type: { type: Type.STRING, enum: ['consumable', 'equipment', 'misc'] },
-                slot: { type: Type.STRING, enum: ['back', 'chest', 'hands'] },
-                capacityBonus: { type: Type.INTEGER }
-            },
-            required: ["name", "description", "effect", "type"]
-        }
-      },
-      mapData: {
-        type: Type.OBJECT,
-        properties: {
-            locationName: { type: Type.STRING },
-            grid: {
-                type: Type.ARRAY,
-                items: {
-                    type: Type.ARRAY,
-                    items: { type: Type.STRING }
-                },
-                description: "5x5 grid array. Use '.' for empty road/terrain, and Emojis for POIs/Actors."
-            },
-            legend: {
-                type: Type.ARRAY,
-                items: {
-                    type: Type.OBJECT,
-                    properties: {
-                        symbol: { type: Type.STRING },
-                        description: { type: Type.STRING }
+                    role: { type: Type.STRING, enum: ['Merchant', 'Civilian', 'Animal', 'Other'] },
+                    currentHp: { type: Type.INTEGER },
+                    maxHp: { type: Type.INTEGER },
+                    isMerchant: { type: Type.BOOLEAN },
+                    shopItems: {
+                        type: Type.ARRAY,
+                        items: {
+                            type: Type.OBJECT,
+                            properties: {
+                                name: { type: Type.STRING },
+                                description: { type: Type.STRING },
+                                effect: { type: Type.STRING },
+                                type: { type: Type.STRING, enum: ['consumable', 'equipment', 'misc'] },
+                                slot: { type: Type.STRING, enum: ['back', 'chest', 'hands'] },
+                                price: { type: Type.INTEGER }
+                            },
+                            required: ["name", "description", "effect", "type", "price"]
+                        }
                     },
-                    required: ["symbol", "description"]
-                }
+                    status: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, description: { type: Type.STRING }, duration: { type: Type.INTEGER } }, required: ["name", "description", "duration"] } }
+                },
+                required: ["id", "name", "description", "role", "currentHp", "maxHp", "isMerchant"]
             }
         },
-        required: ["locationName", "grid", "legend"]
-      }
+      nearbyItems: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, description: { type: Type.STRING }, effect: { type: Type.STRING }, type: { type: Type.STRING }, slot: { type: Type.STRING }, capacityBonus: { type: Type.INTEGER } }, required: ["name", "description", "effect", "type"] } },
+      mapData: { type: Type.OBJECT, properties: { locationName: { type: Type.STRING }, grid: { type: Type.ARRAY, items: { type: Type.ARRAY, items: { type: Type.STRING } } }, legend: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { symbol: { type: Type.STRING }, description: { type: Type.STRING } }, required: ["symbol", "description"] } } }, required: ["locationName", "grid", "legend"] },
+      timeData: { type: Type.OBJECT, properties: { dayCount: { type: Type.INTEGER }, phase: { type: Type.STRING, enum: ['DAWN', 'DAY', 'DUSK', 'NIGHT'] }, description: { type: Type.STRING } }, required: ["dayCount", "phase", "description"] }
     },
-    required: ["storyText", "systemLogs", "isGameOver", "attributeChanges", "resourceChanges", "inventoryUpdates", "activeEnemies", "activeAllies", "nearbyItems", "mapData"]
+    required: ["storyText", "systemLogs", "isGameOver", "attributeChanges", "resourceChanges", "inventoryUpdates", "activeEnemies", "activeAllies", "activeNeutrals", "nearbyItems", "mapData", "timeData"]
   };
 
   const prompt = `
   Mundo: ${world.premise}
-  Objetivo: ${world.mainObjective}
+  Moeda: ${world.currencyName}
+
+  ${timeContext}
+  AVANÇO DO TEMPO: Baseado nas ações e narrativa, avance o tempo de forma lógica (ex: Tarde -> Noite). Se passaram a noite em algum lugar, avance o dia.
 
   HISTÓRICO RECENTE:
   ${context.slice(-8000)} 
 
-  CONTEXTO DE COMBATE INIMIGO E ALIADO:
+  CONTEXTO:
   ${enemyContext}
-  ${allyContext}
+  ${neutralContext}
 
-  AÇÕES DA RODADA (JOGADORES):
+  AÇÕES (JOGADORES):
   ${actionContext}
 
-  INSTRUÇÕES FINAIS:
-    - Escreva como um autor de fantasia.
-  - **ITEM NAS MÃOS**: Se o jogador atacou, VERIFIQUE se há um item nas MÃOS (hands). Se houver, descreva o ataque usando essa arma e APLIQUE o bônus mecânico do item na resolução.
-  - Se houver combate, use as rolagens fornecidas para narrar o sucesso/falha dos inimigos.
-  - Se jogadores persuadirem NPCs com sucesso, mova-os de Inimigos para Aliados.
-  - **LOOT**: Se itens forem encontrados, coloque-os em 'nearbyItems'. Se um item for uma mochila, defina slot='back' e capacityBonus.
-  - Gerencie HP, Mana e Estamina dos inimigos, aliados e jogadores rigorosamente.
-  - **SEPARAÇÃO RIGOROSA**:
-    1. 'systemLogs': Aqui você coloca os cálculos. Ex: "[SISTEMA] Goblin (Ataque): 15 em d20 + 3 (vs Defesa 14). SUCESSO."
-    2. 'storyText': Aqui você escreve a cena LITERÁRIA. "O goblin salta e corta seu braço." (SEM NÚMEROS).
-  - **ITEM NAS MÃOS**: Se o jogador atacou, descreva usando a arma equipada.
-  - **ROLA AS AÇÕES DA IA**: Você deve decidir e rolar (internamente) para todos os Inimigos e Aliados.
-  - **LOG**: O campo resourceChanges deve conter TODAS as mudanças numéricas da rodada.
-  - **MAPA**: ATUALIZE o mini-mapa 5x5.
+  INSTRUÇÕES:
+  - **COMÉRCIO**: Se os jogadores comprarem algo (narrado ou sistema), deduza o dinheiro via 'inventoryUpdates' (usando campo 'cost' ou narrando).
+  - **NEUTROS**: Gerencie a lista 'activeNeutrals'. Se um civil for atacado, ele pode virar Inimigo (mova para activeEnemies).
+  - **CONTINUIDADE**: Lembre-se do tempo anterior.
+  - **MAPA OBRIGATÓRIO**.
   `;
 
   return callWithRetry(async () => {

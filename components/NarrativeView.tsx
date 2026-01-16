@@ -1,9 +1,9 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Character, NarrativeTurn, DiceType, RollResult, WorldData, TurnResponse, Enemy, MapData, StatusEffect, Item, Ally, EquipmentSlot } from '../types';
+import { Character, NarrativeTurn, DiceType, RollResult, WorldData, TurnResponse, Enemy, MapData, StatusEffect, Item, Ally, EquipmentSlot, TimeData, NeutralNPC } from '../types';
 import { processTurn } from '../services/geminiService';
 import { Button } from './Button';
-import { User, Dices, ChevronDown, Target, Trophy, Skull, Backpack, Heart, Flame, Droplets, Sword, ClipboardList, ScrollText, Map as MapIcon, Compass, ShieldCheck, AlertCircle, Clock, Plus, XCircle, Shield, Hand, ArrowDownToLine, ArrowUpFromLine, Star, Trash, Shirt, Zap } from 'lucide-react';
+import { User, Dices, ChevronDown, Target, Trophy, Skull, Backpack, Heart, Flame, Droplets, Sword, ClipboardList, ScrollText, Map as MapIcon, Compass, ShieldCheck, AlertCircle, Clock, Plus, XCircle, Shield, Hand, ArrowDownToLine, ArrowUpFromLine, Star, Trash, Shirt, Zap, Sun, Moon, Sunrise, Sunset, Coins, ShoppingBag, X, DollarSign } from 'lucide-react';
 
 interface NarrativeViewProps {
   characters: Character[];
@@ -12,7 +12,7 @@ interface NarrativeViewProps {
   initialEnemies?: Enemy[];
   initialAllies?: Ally[];
   karmicDiceEnabled?: boolean;
-  initialMapData?: MapData; 
+  initialMapData?: MapData;
   onStateChange: (hasEnemies: boolean, gameResult: 'victory' | 'defeat' | null) => void;
 }
 
@@ -58,9 +58,9 @@ const MapPin = ({ symbol, label, type = 'poi' }: { symbol: string, label?: strin
     <div className="relative flex flex-col items-center justify-center z-10 group w-full h-full">
         <div className={`relative flex items-center justify-center w-full h-full transition-transform duration-200 hover:scale-110`}>
             {type === 'actor' ? (
-                 <span className="text-lg md:text-xl drop-shadow-md filter">{symbol}</span>
+                 <span className="text-xl md:text-2xl drop-shadow-md filter">{symbol}</span>
             ) : (
-                 <span className="text-lg md:text-xl drop-shadow-sm">{symbol}</span>
+                 <span className="text-lg md:text-xl drop-shadow-sm text-slate-400">{symbol}</span>
             )}
         </div>
         {label && (
@@ -70,6 +70,27 @@ const MapPin = ({ symbol, label, type = 'poi' }: { symbol: string, label?: strin
         )}
     </div>
 );
+
+// Time Widget Component
+const TimeWidget: React.FC<{ timeData: TimeData }> = ({ timeData }) => {
+    const getIcon = () => {
+        switch(timeData.phase) {
+            case 'DAWN': return <Sunrise className="text-orange-400" size={16} />;
+            case 'DAY': return <Sun className="text-yellow-400" size={16} />;
+            case 'DUSK': return <Sunset className="text-purple-400" size={16} />;
+            case 'NIGHT': return <Moon className="text-blue-200" size={16} />;
+            default: return <Sun size={16} />;
+        }
+    };
+
+    return (
+        <div className="flex items-center gap-2 bg-slate-900/80 px-3 py-1 rounded-full border border-slate-700 text-xs shadow-lg whitespace-nowrap">
+             <span className="font-bold text-slate-400 uppercase tracking-wider mr-1">Dia {timeData.dayCount}</span>
+             {getIcon()}
+             <span className="text-slate-200 font-serif italic truncate max-w-[100px] md:max-w-none">{timeData.description}</span>
+        </div>
+    );
+};
 
 export const NarrativeView: React.FC<NarrativeViewProps> = ({ 
     characters: initialCharacters, 
@@ -81,7 +102,7 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
     initialMapData,
     onStateChange
 }) => {
-  const [activeCharacters, setActiveCharacters] = useState<Character[]>(initialCharacters.map(c => ({...c, status: c.status || [], equipment: c.equipment || {}})));
+  const [activeCharacters, setActiveCharacters] = useState<Character[]>(initialCharacters.map(c => ({...c, status: c.status || [], equipment: c.equipment || {}, wealth: c.wealth || 0})));
   const [history, setHistory] = useState<NarrativeTurn[]>(initialHistory);
   const [actions, setActions] = useState<Record<string, string>>({});
   const [selectedDice, setSelectedDice] = useState<Record<string, DiceType>>({});
@@ -89,11 +110,16 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
   const [gameResult, setGameResult] = useState<'victory' | 'defeat' | null>(null);
   const [enemies, setEnemies] = useState<Enemy[]>(initialEnemies?.map(e => ({...e, status: e.status || []})) || []);
   const [activeAllies, setActiveAllies] = useState<Ally[]>(initialAllies?.map(a => ({...a, status: a.status || []})) || []);
-  const [nearbyItems, setNearbyItems] = useState<Item[]>([]); // Itens no chão
-  const [activeTab, setActiveTab] = useState<'combat' | 'map' | 'character' | 'inventory' | 'logs'>('combat');
+  const [activeNeutrals, setActiveNeutrals] = useState<NeutralNPC[]>([]); // New state for Neutrals
+  const [nearbyItems, setNearbyItems] = useState<Item[]>([]); 
+  const [activeTab, setActiveTab] = useState<'entities' | 'map' | 'character' | 'inventory' | 'logs'>('entities');
   const [mechanicLogs, setMechanicLogs] = useState<MechanicLog[]>([]);
   const [mapData, setMapData] = useState<MapData | null>(initialMapData || null);
   const [karmaMap, setKarmaMap] = useState<Record<string, number>>({});
+  const [timeData, setTimeData] = useState<TimeData>({ dayCount: 1, phase: 'DAY', description: 'O dia começa...' });
+  
+  // Trade Modal State
+  const [tradeTarget, setTradeTarget] = useState<NeutralNPC | null>(null);
 
   // UI state for adding statuses
   const [addingStatusTo, setAddingStatusTo] = useState<{id: string, type: 'enemy' | 'character'} | null>(null);
@@ -227,8 +253,6 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
 
       setActiveCharacters(prev => prev.map(c => {
           if (c.id === charId) {
-              // Simple Regex to attempt to parse effects locally for instant feedback
-              // Looks for "Heals/Recovers X HP/Mana/Stamina" patterns
               const hpMatch = item.effect.match(/(?:recupera|cura|ganha|\+)\s*(\d+)\s*(?:hp|vida)/i);
               const manaMatch = item.effect.match(/(?:recupera|cura|ganha|\+)\s*(\d+)\s*(?:mana|mp)/i);
               const stMatch = item.effect.match(/(?:recupera|cura|ganha|\+)\s*(\d+)\s*(?:stamina|estamina|st)/i);
@@ -238,7 +262,7 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
 
               if (hpMatch) {
                   const val = parseInt(hpMatch[1]);
-                  newDerived.hp += val; // Usually max HP logic would be here, but let's keep it simple or unbound for now
+                  newDerived.hp += val; 
                   addLog(c.name, `Recuperou ${val} HP com ${item.name}`, 'gain');
                   effectApplied = true;
               }
@@ -270,9 +294,7 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
   };
 
   const handleEquipItem = (charId: string, item: Item, itemIndex: number) => {
-      if (enemies.length > 0) return; // Block in combat
       if (!item.slot) return;
-
       setActiveCharacters(prev => prev.map(c => {
           if (c.id === charId) {
               const currentEquipped = c.equipment?.[item.slot!];
@@ -290,8 +312,6 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
   };
 
   const handleUnequipItem = (charId: string, slot: EquipmentSlot) => {
-      if (enemies.length > 0) return; // Block in combat
-
       setActiveCharacters(prev => prev.map(c => {
           if (c.id === charId) {
               const item = c.equipment?.[slot];
@@ -311,6 +331,56 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
       addLog('Equipamento', `Desequipou item das ${slot}.`, 'system-info');
   };
 
+  const handleBuyItem = (charId: string, item: Item, npcId: string) => {
+      if (!item.price) return;
+      
+      setActiveCharacters(prev => prev.map(c => {
+          if (c.id === charId) {
+              if (c.wealth < (item.price || 0)) {
+                  addLog('Comércio', `Dinheiro insuficiente para comprar ${item.name}.`, 'system-info');
+                  return c;
+              }
+              if (c.items.length >= getInventoryLimit(c)) {
+                  addLog('Comércio', `Sem espaço na mochila.`, 'system-info');
+                  return c;
+              }
+              
+              addLog('Comércio', `${c.name} comprou ${item.name} por ${item.price}.`, 'gain');
+              return {
+                  ...c,
+                  wealth: c.wealth - (item.price || 0),
+                  items: [...c.items, item]
+              };
+          }
+          return c;
+      }));
+  };
+
+  const handleSellItem = (charId: string, item: Item, itemIndex: number) => {
+    if (!tradeTarget) return;
+    const sellPrice = Math.floor((item.price || 10) / 2); // Default 5 gold equivalent if no price
+    
+    setActiveCharacters(prev => prev.map(c => {
+        if (c.id === charId) {
+            const newItems = c.items.filter((_, idx) => idx !== itemIndex);
+            return { ...c, wealth: c.wealth + sellPrice, items: newItems };
+        }
+        return c;
+    }));
+    
+    // Add item to merchant shop
+    setActiveNeutrals(prev => prev.map(n => {
+        if (n.id === tradeTarget.id) {
+            return { ...n, shopItems: [...(n.shopItems || []), item] };
+        }
+        return n;
+    }));
+    // Update local trade target state
+    setTradeTarget(prev => prev ? ({...prev, shopItems: [...(prev.shopItems || []), item]}) : null);
+
+    addLog('Comércio', `${activeCharacters.find(c => c.id === charId)?.name} vendeu ${item.name} por ${sellPrice}.`, 'gain');
+  };
+
   const submitTurn = async () => {
     if (!worldData) return;
     const turnPlayerRolls: Record<string, RollResult> = {};
@@ -321,23 +391,19 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
       addLog(c.name, `Tentativa de Ação`, 'player-roll', result);
     });
 
-    // Removido enemyRolls do cliente. A IA rola internamente.
-
     setHistory(prev => [...prev, { role: 'player', content: activeCharacters.map(c => `> **${c.name}**: ${actions[c.id] || "Aguarda..."}`).join('\n'), timestamp: Date.now() }]);
     setActions({});
     setIsProcessing(true);
     try {
-      const response: TurnResponse = await processTurn(history, activeCharacters.map(c => ({name: c.name, action: actions[c.id] || ""})), activeCharacters, turnPlayerRolls, worldData, enemies, activeAllies);
+      const response: TurnResponse = await processTurn(history, activeCharacters.map(c => ({name: c.name, action: actions[c.id] || ""})), activeCharacters, turnPlayerRolls, worldData, enemies, activeAllies, activeNeutrals, timeData);
       let updatedCharacters = [...activeCharacters];
       
-      // Process System Logs from AI
       if (response.systemLogs) {
           response.systemLogs.forEach(log => {
               addLog('Sistema', log, 'system-info');
           });
       }
 
-      // Resource Changes
       if (response.resourceChanges) {
         response.resourceChanges.forEach(change => {
           const charIndex = updatedCharacters.findIndex(c => c.name === change.characterName);
@@ -346,20 +412,17 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
               updatedCharacters[charIndex] = { ...updatedCharacters[charIndex], derived: { ...updatedCharacters[charIndex].derived, [res]: Math.max(0, updatedCharacters[charIndex].derived[res] + change.value) } };
               addLog('Sistema', `${change.characterName}: ${res.toUpperCase()} ${change.value > 0 ? '+' : ''}${change.value}`, change.value < 0 ? 'damage' : 'gain');
           } else {
-             // Log apenas para inimigos/aliados
              addLog('Sistema', `${change.characterName}: ${change.resource.toUpperCase()} ${change.value > 0 ? '+' : ''}${change.value}`, change.value < 0 ? 'damage' : 'gain');
           }
         });
       }
 
-      // Inventory Updates (Fix Duplication)
       if (response.inventoryUpdates) {
         response.inventoryUpdates.forEach(update => {
           const charIndex = updatedCharacters.findIndex(c => c.name === update.characterName);
           if (charIndex !== -1) {
               const char = updatedCharacters[charIndex];
               if (update.action === 'ADD') {
-                  // DUPLICATION FIX: Check if item exists in nearby items before adding
                   setNearbyItems(prev => {
                       if (prev.some(i => i.name === update.item.name)) return prev;
                       addLog('Loot', `${update.item.name} caiu no chão/encontrado.`, 'system-info');
@@ -367,13 +430,16 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                   });
               } else if (update.action === 'REMOVE') {
                   char.items = char.items.filter(i => i.name !== update.item.name);
+                  if (update.cost) {
+                      char.wealth = Math.max(0, char.wealth - update.cost);
+                      addLog('Comércio', `Gastou ${update.cost}.`, 'system-info');
+                  }
                   addLog('Perda', `${char.name} perdeu ${update.item.name}`, 'damage');
               }
           }
         });
       }
 
-      // New Nearby Items from AI (Fix Duplication)
       if (response.nearbyItems && response.nearbyItems.length > 0) {
           setNearbyItems(prev => {
               const newItems = response.nearbyItems.filter(newItem => !prev.some(existing => existing.name === newItem.name));
@@ -393,21 +459,21 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
       }
       setActiveCharacters(updatedCharacters);
       
-      // Update Enemies, Allies and Map
-      if (response.activeEnemies) {
-          setEnemies(response.activeEnemies.map(e => ({...e, status: e.status || []})));
+      if (response.activeEnemies) setEnemies(response.activeEnemies.map(e => ({...e, status: e.status || []})));
+      if (response.activeAllies) setActiveAllies(response.activeAllies.map(a => ({...a, status: a.status || []})));
+      if (response.activeNeutrals) setActiveNeutrals(response.activeNeutrals);
+      
+      if (response.timeData) setTimeData(response.timeData);
+
+      if (response.mapData) {
+          setMapData(response.mapData);
       }
-      if (response.activeAllies) {
-          setActiveAllies(response.activeAllies.map(a => ({...a, status: a.status || []})));
-      }
-      if (response.mapData) setMapData(response.mapData);
       
       setHistory(prev => [...prev, { role: 'gm', content: response.storyText, timestamp: Date.now() + 100 }]);
       
       const newGameResult = response.isGameOver && response.gameResult ? (response.gameResult === 'VICTORY' ? 'victory' : 'defeat') : null;
       if (newGameResult) setGameResult(newGameResult);
 
-      // Notify App about state changes for Music
       onStateChange(
         (response.activeEnemies && response.activeEnemies.length > 0) || false,
         newGameResult
@@ -434,15 +500,111 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
 
   return (
     <div className="flex flex-col md:flex-row h-[calc(100vh-100px)] max-w-7xl mx-auto gap-4">
+      {/* TRADE MODAL */}
+      {tradeTarget && (
+          <div className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
+              <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[85vh]">
+                  <div className="p-4 border-b border-slate-800 bg-slate-950 flex justify-between items-center">
+                      <div className="flex items-center gap-3">
+                          <ShoppingBag className="text-amber-500" />
+                          <div>
+                              <h3 className="font-cinzel text-xl text-amber-100 font-bold">{tradeTarget.name}</h3>
+                              <p className="text-xs text-slate-400 uppercase tracking-widest">Mercador</p>
+                          </div>
+                      </div>
+                      <button onClick={() => setTradeTarget(null)} className="text-slate-500 hover:text-white"><X size={24}/></button>
+                  </div>
+                  
+                  <div className="flex flex-1 overflow-hidden flex-col md:flex-row">
+                      {/* COMPRAR */}
+                      <div className="flex-1 p-4 border-b md:border-b-0 md:border-r border-slate-800 overflow-y-auto bg-[url('https://www.transparenttextures.com/patterns/wood-pattern.png')]">
+                          <h4 className="text-sm font-bold text-amber-400 uppercase mb-3 flex items-center gap-2 sticky top-0 bg-slate-900/90 py-2 z-10 rounded px-2 backdrop-blur-sm shadow">
+                              <ArrowDownToLine size={14}/> Estoque da Loja (Comprar)
+                          </h4>
+                          {!tradeTarget.shopItems || tradeTarget.shopItems.length === 0 ? (
+                              <div className="text-center text-slate-400 italic mt-8">O estoque está vazio...</div>
+                          ) : (
+                              <div className="grid grid-cols-1 gap-3">
+                                  {tradeTarget.shopItems.map((item, idx) => (
+                                      <div key={idx} className="bg-slate-900/90 p-3 rounded border border-slate-700 shadow-md flex justify-between items-start gap-2">
+                                          <div className="flex-1">
+                                              <div className="font-bold text-slate-200">{item.name}</div>
+                                              <div className="text-xs text-slate-400 leading-tight mb-2">{item.description}</div>
+                                              <div className="text-[10px] uppercase font-bold text-slate-500 bg-slate-950 px-1 rounded inline-block">{item.type}</div>
+                                          </div>
+                                          <div className="flex flex-col items-end gap-2 w-28">
+                                              <div className="font-bold text-amber-500 flex items-center gap-1">
+                                                  <Coins size={14} /> {item.price}
+                                              </div>
+                                              <div className="flex flex-col gap-1 w-full">
+                                                  {activeCharacters.map(char => (
+                                                      <button 
+                                                          key={char.id}
+                                                          disabled={char.wealth < (item.price || 99999)}
+                                                          onClick={() => handleBuyItem(char.id, item, tradeTarget.id)}
+                                                          className="px-2 py-1 bg-amber-700 hover:bg-amber-600 disabled:bg-slate-800 disabled:opacity-50 text-[10px] text-white rounded font-bold transition-colors w-full truncate"
+                                                          title={`Comprar para ${char.name} (${char.wealth})`}
+                                                      >
+                                                          Comprar ({char.name.substring(0,3)})
+                                                      </button>
+                                                  ))}
+                                              </div>
+                                          </div>
+                                      </div>
+                                  ))}
+                              </div>
+                          )}
+                      </div>
+
+                      {/* VENDER */}
+                      <div className="flex-1 p-4 overflow-y-auto bg-slate-900/50">
+                          <h4 className="text-sm font-bold text-green-400 uppercase mb-3 flex items-center gap-2 sticky top-0 bg-slate-900/90 py-2 z-10 rounded px-2 backdrop-blur-sm shadow">
+                              <ArrowUpFromLine size={14}/> Seus Inventários (Vender)
+                          </h4>
+                           <div className="space-y-4">
+                              {activeCharacters.map(char => (
+                                  <div key={char.id} className="bg-slate-950 border border-slate-800 rounded p-3">
+                                      <div className="flex justify-between items-center mb-2 pb-1 border-b border-slate-800">
+                                          <span className="text-xs font-bold text-slate-300">{char.name}</span>
+                                          <span className="text-xs text-amber-400 font-bold flex items-center gap-1"><Coins size={10}/> {char.wealth}</span>
+                                      </div>
+                                      {char.items.length === 0 ? <div className="text-[10px] text-slate-600 italic">Mochila vazia.</div> : (
+                                          <div className="grid grid-cols-1 gap-2">
+                                              {char.items.map((item, idx) => (
+                                                  <div key={idx} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-800">
+                                                      <div className="text-[10px] text-slate-300 font-bold truncate pr-2">{item.name}</div>
+                                                      <button 
+                                                          onClick={() => handleSellItem(char.id, item, idx)}
+                                                          className="flex items-center gap-1 px-2 py-1 bg-green-900/30 hover:bg-green-700 text-green-300 border border-green-800 rounded text-[9px] font-bold transition-colors"
+                                                      >
+                                                          <DollarSign size={10} /> Vender (+{Math.floor((item.price || 10) / 2)})
+                                                      </button>
+                                                  </div>
+                                              ))}
+                                          </div>
+                                      )}
+                                  </div>
+                              ))}
+                           </div>
+                      </div>
+                  </div>
+              </div>
+          </div>
+      )}
+
       <div className="flex flex-col flex-1 bg-slate-900/50 rounded-xl overflow-hidden border border-slate-800 shadow-2xl relative order-2 md:order-1">
         {worldData && (
-          <div className="bg-slate-950/80 backdrop-blur-sm border-b border-amber-900/30 p-2 flex items-center justify-center gap-2 text-center shadow-md absolute top-0 left-0 right-0 z-20">
-            <Target size={14} className="text-amber-500" />
-            <span className="text-xs uppercase tracking-widest text-amber-500/70 font-bold">Objetivo:</span>
-            <span className="text-xs text-amber-100 font-bold">{worldData.mainObjective}</span>
+          <div className="bg-slate-950/90 backdrop-blur-md border-b border-amber-900/30 p-2 flex items-center justify-between gap-2 px-4 shadow-md absolute top-0 left-0 right-0 z-20">
+            <div className="flex items-center gap-2 flex-1 min-w-0" title={worldData.mainObjective}>
+                <Target size={14} className="text-amber-500 shrink-0" />
+                <span className="text-xs text-amber-100 font-bold truncate cursor-help hover:text-white transition-colors">
+                    {worldData.mainObjective}
+                </span>
+            </div>
+            <TimeWidget timeData={timeData} />
           </div>
         )}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6 pt-12">
+        <div className="flex-1 overflow-y-auto p-6 space-y-6 pt-14">
           {history.map((turn, index) => (
              turn.role !== 'system' && (
                 <div key={index} className={`flex flex-col ${turn.role === 'gm' ? 'items-start' : 'items-end'}`}>
@@ -476,11 +638,11 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
           <Button onClick={submitTurn} disabled={isProcessing} variant={activeCharacters.every(c => (actions[c.id] || '').length > 0) ? 'primary' : 'secondary'} className="w-full">Enviar Turno</Button>
         </div>
       </div>
-      <div className="w-full md:w-80 bg-slate-900/50 rounded-xl border border-slate-800 shadow-xl overflow-hidden flex flex-col order-1 md:order-2">
-        <div className="flex border-b border-slate-800 overflow-x-auto scrollbar-hide">
-            {['combat', 'map', 'character', 'inventory', 'logs'].map((tab) => (
+      <div className="w-full md:w-80 bg-slate-900/50 rounded-xl border border-slate-800 shadow-xl overflow-hidden flex flex-col order-1 md:order-2 h-[500px] md:h-auto">
+        <div className="flex border-b border-slate-800 overflow-x-auto scrollbar-hide flex-none">
+            {['entities', 'map', 'character', 'inventory', 'logs'].map((tab) => (
                 <button key={tab} onClick={() => setActiveTab(tab as any)} className={`flex-1 min-w-[50px] py-3 text-xs font-bold uppercase flex items-center justify-center transition-colors ${activeTab === tab ? 'bg-slate-800 text-amber-500' : 'bg-slate-950 text-slate-500'}`}>
-                    {tab === 'combat' && <Sword size={14} />}
+                    {tab === 'entities' && <Sword size={14} />}
                     {tab === 'map' && <MapIcon size={14} />}
                     {tab === 'character' && <User size={14} />}
                     {tab === 'inventory' && <Backpack size={14} />}
@@ -489,7 +651,7 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
             ))}
         </div>
         <div className="p-4 space-y-6 flex-1 overflow-y-auto bg-slate-900/30">
-            {activeTab === 'combat' && (
+            {activeTab === 'entities' && (
                 <div className="space-y-4 animate-fade-in">
                     {/* SEÇÃO DE INIMIGOS */}
                     <div className="space-y-3">
@@ -507,15 +669,6 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                                             {enemy.currentHp} / {enemy.maxHp} HP
                                         </div>
                                     </div>
-                                    <div className="flex gap-1 mt-1">
-                                        <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden flex-1 relative border border-slate-700/50" title="Mana">
-                                            <div className="h-full bg-blue-500 transition-all duration-500" style={{ width: `${getHpPercent(enemy.currentMana || 0, enemy.maxMana || 1)}%` }}/>
-                                        </div>
-                                        <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden flex-1 relative border border-slate-700/50" title="Stamina">
-                                            <div className="h-full bg-amber-500 transition-all duration-500" style={{ width: `${getHpPercent(enemy.currentStamina || 0, enemy.maxStamina || 1)}%` }}/>
-                                        </div>
-                                    </div>
-
                                     <div className="flex flex-wrap items-center gap-1 mt-2 min-h-[20px]">
                                         {enemy.status?.map((st, i) => (
                                             <StatusBadge 
@@ -524,29 +677,35 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                                                 onRemove={() => handleRemoveStatus(enemy.id, 'enemy', i)} 
                                             />
                                         ))}
-                                        <div className="relative">
-                                            <button 
-                                                onClick={() => setAddingStatusTo(addingStatusTo?.id === enemy.id ? null : {id: enemy.id, type: 'enemy'})}
-                                                className="text-slate-500 hover:text-amber-500 transition-colors bg-slate-900 border border-slate-700 rounded-full p-0.5"
-                                                title="Adicionar Status"
-                                            >
-                                                <Plus size={10} />
-                                            </button>
-                                            {addingStatusTo?.id === enemy.id && addingStatusTo.type === 'enemy' && (
-                                                <div className="absolute top-full left-0 mt-1 w-40 bg-slate-900 border border-slate-700 rounded shadow-xl z-50 animate-fade-in max-h-48 overflow-y-auto">
-                                                    {AVAILABLE_STATUSES.map(st => (
-                                                        <button 
-                                                            key={st.name} 
-                                                            className="w-full text-left px-2 py-1.5 text-[9px] hover:bg-slate-800 text-slate-300 hover:text-white border-b border-slate-800 last:border-0"
-                                                            onClick={() => handleAddStatus(enemy.id, 'enemy', st)}
-                                                        >
-                                                            {st.name}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            )}
-                                        </div>
                                     </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+
+                    {/* SEÇÃO DE NEUTROS */}
+                    <div className="space-y-3 pt-4 border-t border-slate-800">
+                        <h4 className="text-xs text-yellow-400 font-bold uppercase mb-1 flex items-center gap-1"><User size={10} /> Neutros / Mercadores</h4>
+                        {activeNeutrals.length === 0 ? <div className="text-center py-2 text-slate-600 text-[10px] italic">Ninguém neutro por perto.</div> : (
+                            activeNeutrals.map((npc, idx) => (
+                                <div key={idx} className="bg-slate-900/50 border border-yellow-900/30 rounded p-2 space-y-2 relative">
+                                    <div className="flex justify-between items-center mb-1">
+                                        <span className="text-xs font-bold text-yellow-200">{npc.name}</span>
+                                        <span className="text-[8px] bg-yellow-900/50 text-yellow-300 px-1.5 rounded uppercase font-bold">{npc.role}</span>
+                                    </div>
+                                    <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden relative">
+                                        <div className="h-full bg-yellow-500 transition-all duration-500" style={{ width: `${getHpPercent(npc.currentHp, npc.maxHp)}%` }}/>
+                                    </div>
+                                    <div className="text-[9px] text-slate-400 italic leading-tight">{npc.description}</div>
+                                    
+                                    {npc.isMerchant && (
+                                        <button 
+                                            onClick={() => setTradeTarget(npc)}
+                                            className="w-full mt-2 py-1 bg-amber-700/50 hover:bg-amber-600 text-amber-100 border border-amber-600/50 rounded flex items-center justify-center gap-1 text-[10px] font-bold transition-colors"
+                                        >
+                                            <ShoppingBag size={10} /> Comerciar
+                                        </button>
+                                    )}
                                 </div>
                             ))
                         )}
@@ -580,6 +739,17 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                     {activeCharacters.map(char => (
                         <div key={char.id} className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-2">
                             <h5 className="font-cinzel text-blue-200 text-xs font-bold">{char.name}</h5>
+                            
+                            {/* Stats Display Grid */}
+                            <div className="grid grid-cols-4 gap-1 mb-2 bg-slate-900/50 p-2 rounded">
+                                {Object.entries(char.attributes).map(([attr, val]) => (
+                                    <div key={attr} className="text-center bg-slate-800/80 rounded p-0.5 border border-slate-700/50">
+                                        <div className="text-[7px] text-slate-500 font-bold uppercase">{attr}</div>
+                                        <div className="text-xs font-bold text-slate-200 font-mono">{val}</div>
+                                    </div>
+                                ))}
+                            </div>
+
                             <div className="grid grid-cols-3 gap-1 text-[10px] font-mono border-y border-slate-800/30 py-1">
                                 <span className="text-red-400 flex items-center gap-1"><Heart size={10}/> {char.derived.hp}</span>
                                 <span className="text-blue-400 flex items-center gap-1"><Droplets size={10}/> {char.derived.mana}</span>
@@ -617,7 +787,7 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                                 </div>
                             </div>
                             
-                            {/* NEW SKILL HUD */}
+                            {/* SKILL HUD */}
                             <div className="mt-2 pt-2 border-t border-slate-800/50">
                                 <span className="text-[9px] font-bold text-slate-500 uppercase flex items-center gap-1 mb-2"><Star size={8}/> Habilidades</span>
                                 <div className="grid grid-cols-2 gap-2">
@@ -682,7 +852,10 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                             <div key={char.id} className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-2">
                                 <div className="flex justify-between items-center border-b border-slate-800 pb-1">
                                     <h5 className="font-cinzel text-amber-100 text-[10px] font-bold">{char.name}</h5>
-                                    <span className={`text-[10px] font-bold ${char.items.length >= getInventoryLimit(char) ? 'text-red-500' : 'text-slate-500'}`}>{char.items.length}/{getInventoryLimit(char)}</span>
+                                    <div className="flex items-center gap-3">
+                                        <span className="text-xs font-bold text-amber-400 flex items-center gap-1 bg-black/30 px-1.5 rounded"><Coins size={10}/> {char.wealth}</span>
+                                        <span className={`text-[10px] font-bold ${char.items.length >= getInventoryLimit(char) ? 'text-red-500' : 'text-slate-500'}`}>{char.items.length}/{getInventoryLimit(char)}</span>
+                                    </div>
                                 </div>
                                 
                                 {/* EQUIPMENT SLOTS */}
@@ -701,7 +874,7 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                                                         <div className="text-[9px] font-bold text-amber-500 truncate">{equippedItem.name}</div>
                                                         <button 
                                                             onClick={(e) => { e.stopPropagation(); handleUnequipItem(char.id, slot); }}
-                                                            disabled={enemies.length > 0}
+                                                            // Permitido em combate
                                                             className="absolute inset-0 bg-red-900/90 text-white opacity-0 group-hover/slot:opacity-100 flex items-center justify-center text-[9px] font-bold transition-opacity disabled:cursor-not-allowed disabled:bg-slate-800 disabled:opacity-50"
                                                         >
                                                             Desequipar
@@ -740,9 +913,9 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                                                 {item.slot && !char.equipment?.[item.slot] && (
                                                     <button 
                                                         onClick={(e) => { e.stopPropagation(); handleEquipItem(char.id, item, i); }}
-                                                        disabled={enemies.length > 0}
-                                                        className="p-1 text-slate-500 hover:text-blue-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                                                        title={enemies.length > 0 ? "Bloqueado em Combate" : "Equipar"}
+                                                        // Permitido em combate
+                                                        className="p-1 text-slate-500 hover:text-blue-400 transition-colors"
+                                                        title="Equipar"
                                                     >
                                                         <ShieldCheck size={10} />
                                                     </button>
@@ -765,28 +938,57 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                     </div>
                 </div>
             )}
+            {activeTab === 'map' && mapData && (
+                <div className="animate-fade-in flex flex-col h-full space-y-4">
+                    <h4 className="text-xs text-green-500/80 font-bold uppercase mb-3 flex items-center gap-2"><Compass size={12} /> Cartografia</h4>
+                    <div className="bg-slate-950 border border-slate-800 rounded p-2 text-center shadow-inner"><h5 className="font-cinzel text-amber-100 text-xs font-bold truncate">{mapData.locationName}</h5></div>
+                    
+                    {/* Fixed Standard Grid */}
+                    <div className="relative aspect-square w-full bg-slate-900 border-4 border-slate-800 rounded-lg shadow-2xl p-2">
+                        <div className="grid grid-cols-5 grid-rows-5 gap-1 h-full w-full">
+                            {mapData.grid?.map((row, rIdx) => (row?.map((cell, cIdx) => (
+                                <div key={`${rIdx}-${cIdx}`} className="bg-slate-950 border border-slate-800 rounded flex items-center justify-center relative hover:border-slate-600 transition-colors group/cell">
+                                    {cell === '.' ? <div className="text-slate-800 text-[10px]">+</div> : <MapPin symbol={cell} label={mapData.legend.find(l => l.symbol === cell)?.description} type={['👹', '👤', '💰'].some(e => cell.includes(e)) ? 'actor' : 'poi'} />}
+                                </div>
+                            ))))}
+                        </div>
+                    </div>
+
+                    <div className="bg-slate-900/50 p-2 rounded border border-slate-800 text-[10px] space-y-1 max-h-[150px] overflow-y-auto">
+                         <h5 className="font-bold text-slate-500 uppercase text-[9px]">Legenda</h5>
+                         {mapData.legend.map((l, i) => (
+                             <div key={i} className="flex gap-2 items-center text-slate-300">
+                                 <span className="w-4 text-center font-bold">{l.symbol}</span>
+                                 <span>{l.description}</span>
+                             </div>
+                         ))}
+                    </div>
+                </div>
+            )}
             {activeTab === 'logs' && (
-                <div className="h-full flex flex-col animate-fade-in space-y-2 relative">
-                    <div className="flex items-center justify-between mb-2">
+                <div className="h-full flex flex-col animate-fade-in relative overflow-hidden">
+                    <div className="flex items-center justify-between mb-2 flex-none bg-slate-900 pb-2 z-10">
                         <h4 className="text-xs text-purple-400 font-bold uppercase flex items-center gap-2"><Dices size={12} /> Log de Batalha</h4>
-                        <button onClick={clearLogs} className="text-[10px] text-slate-500 hover:text-red-400 flex items-center gap-1 border border-slate-700 px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 transition-colors">
+                        <button onClick={clearLogs} className="text-[10px] text-slate-500 hover:text-red-400 flex items-center gap-1 border border-slate-700 px-2 py-1 rounded bg-slate-950 hover:bg-slate-800 transition-colors">
                             <Trash size={10} /> Limpar
                         </button>
                     </div>
-                    {mechanicLogs.map((log) => (
-                        <div key={log.id} className="bg-slate-950/80 p-2 rounded border border-slate-800 text-[10px] space-y-1">
-                            <div className="flex justify-between font-bold">
-                                <span className={log.type === 'player-roll' ? 'text-blue-300' : log.type === 'system-info' ? 'text-slate-400' : 'text-red-300'}>
-                                    {log.source}
-                                </span>
-                                <span>{log.value}</span>
+                    <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+                        {mechanicLogs.map((log) => (
+                            <div key={log.id} className="bg-slate-950/80 p-2 rounded border border-slate-800 text-[10px] space-y-1">
+                                <div className="flex justify-between font-bold">
+                                    <span className={log.type === 'player-roll' ? 'text-blue-300' : log.type === 'system-info' ? 'text-slate-400' : 'text-red-300'}>
+                                        {log.source}
+                                    </span>
+                                    <span>{log.value}</span>
+                                </div>
+                                <div className={`leading-tight ${log.type === 'system-info' && log.content.includes('[SISTEMA]') ? 'text-green-400 font-mono' : 'text-slate-400'}`}>
+                                    {log.content}
+                                </div>
                             </div>
-                            <div className={`leading-tight ${log.type === 'system-info' && log.content.includes('[SISTEMA]') ? 'text-green-400 font-mono' : 'text-slate-400'}`}>
-                                {log.content}
-                            </div>
-                        </div>
-                    ))}
-                    <div ref={logsBottomRef} />
+                        ))}
+                        <div ref={logsBottomRef} />
+                    </div>
                 </div>
             )}
         </div>
