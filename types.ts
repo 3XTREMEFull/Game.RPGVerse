@@ -86,6 +86,7 @@ export interface Enemy {
   maxStamina: number;      
   difficulty: 'Minion' | 'Elite' | 'Boss'; 
   status?: StatusEffect[];
+  skills?: Skill[]; // Habilidades de ataque e passivas dos inimigos
 }
 
 export interface Ally {

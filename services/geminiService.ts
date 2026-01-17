@@ -42,7 +42,7 @@ const SYSTEM_INSTRUCTION = `
 Você é o Mestre de Jogo (GM) para um RPG textual colaborativo.
 
 Seu papel é:
-1. Definir o cenário, temas e a MOEDA DO MUNDO (Ouro, Créditos, Comida, etc).
+1. Definir o cenário, temas e a MOEDA DO MUNDO.
 2. Gerenciar a história, o OBJETIVO FINAL e o TEMPO (Ciclo Dia/Noite).
 3. Adjudicar ações usando o SISTEMA DE REGRAS ESPECÍFICO abaixo.
 4. Responda SEMPRE em Português do Brasil (pt-BR).
@@ -51,6 +51,22 @@ Seu papel é:
 - **CICLO DIA/NOITE**: Você DEVE manter a continuidade do tempo. Se a cena anterior foi à tarde e eles viajaram, agora pode ser noite. Retorne sempre o objeto 'timeData'.
 - **ESTILO LITERÁRIO**: Não seja breve. Escreva descrições ricas, atmosféricas e detalhadas.
 - **RITMO VARIADO**: Não force combate a todo turno. Permita cenas de exploração e comércio.
+
+=== REGRAS CRÍTICAS DE MECÂNICA (LEIA ATENTAMENTE) ===
+
+1. **HP E DANO (OBRIGATÓRIO)**: 
+   - Se a narrativa descreve um ataque de inimigo acertando um jogador, ou um jogador acertando um inimigo, VOCÊ DEVE GERAR UM OBJETO EM 'resourceChanges' com valor NEGATIVO.
+   - Exemplo: Inimigo acerta Jogador -> resourceChange: { characterName: "Jogador", resource: "hp", value: -5 }.
+   - **SE NÃO HOUVER 'resourceChanges' PARA DANO, O JOGO QUEBRA.**
+
+2. **LOOT E ITENS (OBRIGATÓRIO)**:
+   - Se a narrativa descreve um item caindo, sendo encontrado, ou num baú, VOCÊ DEVE GERAR UM OBJETO EM 'nearbyItems'.
+   - Se não preencher 'nearbyItems', o jogador não vê o item.
+
+3. **PASSIVAS E SKILLS**:
+   - ANTES de narrar, LEIA todas as Skills (Ativas e Passivas) dos Personagens e Inimigos fornecidas no contexto.
+   - Se uma passiva é relevante (ex: "Fúria", "Furtividade", "Pele de Ferro"), APLIQUE-A na resolução da cena.
+   - Se o jogador invoca uma skill de ataque pelo nome, use os efeitos dela.
 
 === SISTEMA DE REGRAS (IMUTÁVEL) ===
 ATRIBUTOS (Escala 1-10): FOR, DES, CON, INT, SAB, CAR, AGI, SOR. Modificador = Atributo - 2.
@@ -64,7 +80,7 @@ ATRIBUTOS (Escala 1-10): FOR, DES, CON, INT, SAB, CAR, AGI, SOR. Modificador = A
 - Passivas devem ser verificadas automaticamente.
 
 COMBATE, INIMIGOS, ALIADOS E NEUTROS:
-- Inimigos (Vermelho): Hostis.
+- Inimigos (Vermelho): Hostis. Devem ter SKILLS de ataque e passivas.
 - Aliados (Azul): Amigos/Pets que lutam.
 - **Neutros (Amarelo)**: Mercadores, Animais passivos, Civis. Use a lista 'activeNeutrals'.
   - **MERCADORES**: Se houver um mercador, defina 'isMerchant: true' e preencha 'shopItems' com itens e PREÇOS ('price') adequados à economia do mundo.
@@ -78,9 +94,10 @@ LOOT & ITENS (CRÍTICO):
 **REGRA DE LOOT (SORTE)**: Ao saquear, role 1d20 + SOR ocultamente para definir a qualidade.
 - **ECONOMIA**: Os preços devem fazer sentido com a moeda definida no 'WorldData'.
 
+
 MAPA & NAVEGAÇÃO:
 - O mapa é uma grade 5x5 representando a REGIÃO IMEDIATA.
-- Use Emojis: Personagens (👤), Inimigos (👹), Aliados (🛡️), Neutros/Mercadores (💰).
+- Use Emojis.
 - **O MAPA É OBRIGATÓRIO EM TODOS OS TURNOS**.
 
 1. PRINCÍPIO FUNDAMENTAL: UNIVERSALIDADE DAS REGRAS
@@ -235,7 +252,20 @@ export const startNarrative = async (world: WorldData, characters: Character[]):
                     maxMana: { type: Type.INTEGER },
                     currentStamina: { type: Type.INTEGER },
                     maxStamina: { type: Type.INTEGER },
-                    difficulty: { type: Type.STRING, enum: ["Minion", "Elite", "Boss"] }
+                    difficulty: { type: Type.STRING, enum: ["Minion", "Elite", "Boss"] },
+                    skills: { 
+                        type: Type.ARRAY, 
+                        items: { 
+                            type: Type.OBJECT, 
+                            properties: { 
+                                name: { type: Type.STRING }, 
+                                description: { type: Type.STRING }, 
+                                type: { type: Type.STRING, enum: ['active', 'passive'] },
+                                level: { type: Type.INTEGER } 
+                            }, 
+                            required: ["name", "description", "type", "level"] 
+                        } 
+                    }
                 },
                 required: ["id", "name", "description", "currentHp", "maxHp", "currentMana", "maxMana", "currentStamina", "maxStamina", "difficulty"]
             }
@@ -358,6 +388,21 @@ export const processTurn = async (
       return `${h.role === 'gm' ? 'GM' : 'JOGADORES'}: ${h.content}`;
   }).join('\n\n');
   
+  // Construct Character Passive/Active Skill Context explicitly
+  const characterSkillsContext = characters.map(c => {
+      const activeSkills = c.skills.filter(s => s.type === 'active').map(s => `- [ATIVA] ${s.name}: ${s.description}`).join('\n');
+      const passiveSkills = c.skills.filter(s => s.type === 'passive').map(s => `- [PASSIVA] ${s.name}: ${s.description}`).join('\n');
+      return `PERSONAGEM: ${c.name}\n${activeSkills}\n${passiveSkills}`;
+  }).join('\n\n');
+
+  // Construct Enemy Skill Context explicitly
+  const enemySkillsContext = currentEnemies.map(e => {
+      const skills = e.skills && e.skills.length > 0 
+        ? e.skills.map(s => `- [${s.type.toUpperCase()}] ${s.name}: ${s.description}`).join('\n')
+        : "- Ataque Básico";
+      return `INIMIGO: ${e.name}\n${skills}`;
+  }).join('\n\n');
+
   const actionContext = playerActions.map(p => {
     const char = characters.find(c => c.name === p.name);
     const roll = rolls[char?.id || ''];
@@ -369,15 +414,13 @@ export const processTurn = async (
     if (!char || !roll) return `Ação: ${p.action}`;
     
     const stats = JSON.stringify(char.attributes);
-    // Inclui skills no contexto para a IA saber das passivas
-    const skills = char.skills.map(s => `[${s.type.toUpperCase()}] ${s.name}: ${s.description}`).join('; ');
     
     const handsItem = char.equipment?.hands;
     const handsInfo = handsItem 
-        ? `[ITEM: "${handsItem.name}". EFEITO: "${handsItem.effect}"]` 
+        ? `[ITEM EQUIPADO: "${handsItem.name}". EFEITO: "${handsItem.effect}"]` 
         : "[MÃOS VAZIAS]";
     
-    return `PERSONAGEM: ${p.name}\n- AÇÃO: "${p.action}"\n- DADO: ${roll.type}(${roll.value})\n- ${handsInfo}\n- SKILLS: ${skills}\n- STATS: ${stats}\n- DINHEIRO: ${char.wealth} ${world.currencyName}`;
+    return `PERSONAGEM: ${p.name}\n- AÇÃO: "${p.action}"\n- DADO: ${roll.type}(${roll.value})\n- ${handsInfo}\n- ATRIBUTOS: ${stats}\n- DINHEIRO: ${char.wealth} ${world.currencyName}`;
   }).join('\n\n');
 
   const enemyContext = currentEnemies.length > 0 
@@ -396,7 +439,6 @@ export const processTurn = async (
   if (permadeathEnabled) {
       extraInstructions += `\n**MODO MORTE HABILITADO**:
       - Personagens com HP <= 0 ficam no estado "CAÍDO" (Inconsciente).
-      - Narre uma oportunidade dramática para os aliados salvarem o personagem caído nesta cena.
       - Se ninguém salvar (cura ou teste de medicina) após uma rodada crítica, o personagem MORRE definitivamente.
       - Se TODOS os jogadores estiverem mortos ou caídos sem aliados para ajudar, defina 'isGameOver: true' e 'gameResult: DEFEAT'.
       `;
@@ -417,7 +459,7 @@ export const processTurn = async (
       resourceChanges: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { characterName: { type: Type.STRING }, resource: { type: Type.STRING }, value: { type: Type.INTEGER }, reason: { type: Type.STRING } }, required: ["characterName", "resource", "value", "reason"] } },
       characterStatusUpdates: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { characterName: { type: Type.STRING }, status: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, description: { type: Type.STRING }, duration: { type: Type.INTEGER } }, required: ["name", "description", "duration"] } } }, required: ["characterName", "status"] } },
       inventoryUpdates: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { characterName: { type: Type.STRING }, action: { type: Type.STRING }, cost: { type: Type.INTEGER }, item: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, description: { type: Type.STRING }, effect: { type: Type.STRING }, type: { type: Type.STRING }, slot: { type: Type.STRING }, price: { type: Type.INTEGER } }, required: ["name", "description", "effect", "type"] } }, required: ["characterName", "action", "item"] } },
-      activeEnemies: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { id: { type: Type.STRING }, name: { type: Type.STRING }, description: { type: Type.STRING }, currentHp: { type: Type.INTEGER }, maxHp: { type: Type.INTEGER }, currentMana: { type: Type.INTEGER }, maxMana: { type: Type.INTEGER }, currentStamina: { type: Type.INTEGER }, maxStamina: { type: Type.INTEGER }, difficulty: { type: Type.STRING }, status: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, description: { type: Type.STRING }, duration: { type: Type.INTEGER } }, required: ["name", "description", "duration"] } } }, required: ["id", "name", "description", "currentHp", "maxHp", "difficulty"] } },
+      activeEnemies: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { id: { type: Type.STRING }, name: { type: Type.STRING }, description: { type: Type.STRING }, currentHp: { type: Type.INTEGER }, maxHp: { type: Type.INTEGER }, currentMana: { type: Type.INTEGER }, maxMana: { type: Type.INTEGER }, currentStamina: { type: Type.INTEGER }, maxStamina: { type: Type.INTEGER }, difficulty: { type: Type.STRING }, status: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, description: { type: Type.STRING }, duration: { type: Type.INTEGER } }, required: ["name", "description", "duration"] } }, skills: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, description: { type: Type.STRING }, type: { type: Type.STRING }, level: { type: Type.INTEGER } }, required: ["name", "description", "type", "level"] } } }, required: ["id", "name", "description", "currentHp", "maxHp", "difficulty"] } },
       activeAllies: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { id: { type: Type.STRING }, name: { type: Type.STRING }, description: { type: Type.STRING }, currentHp: { type: Type.INTEGER }, maxHp: { type: Type.INTEGER }, currentMana: { type: Type.INTEGER }, maxMana: { type: Type.INTEGER }, currentStamina: { type: Type.INTEGER }, maxStamina: { type: Type.INTEGER }, status: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, description: { type: Type.STRING }, duration: { type: Type.INTEGER } }, required: ["name", "description", "duration"] } } }, required: ["id", "name", "description", "currentHp", "maxHp"] } },
       activeNeutrals: {
             type: Type.ARRAY,
@@ -467,19 +509,27 @@ export const processTurn = async (
   
   ${extraInstructions}
 
+  CONTEXTO DE HABILIDADES (PASSIVAS E ATIVAS):
+  ${characterSkillsContext}
+
+  ${enemySkillsContext}
+
   HISTÓRICO RECENTE:
   ${context.slice(-8000)} 
 
-  CONTEXTO:
+  CONTEXTO ATUAL:
   ${enemyContext}
   ${neutralContext}
 
   AÇÕES (JOGADORES):
   ${actionContext}
 
-  INSTRUÇÕES:
-  - **SKILLS**: Verifique as skills listadas acima. Se um jogador usa uma skill, verifique se ele a possui. Aplique bônus de passivas.
-  - **ITENS**: Se você gerar itens no cenário (drop de inimigos, baús, achados), PREENCHA 'nearbyItems'. Se não preencher, eles não aparecerão no jogo.
+  INSTRUÇÕES CRÍTICAS (PARA CORRIGIR BUGS):
+  1. **DANO REAL**: Se você narrar que um inimigo atacou e feriu um personagem (ou vice-versa), você **DEVE** adicionar uma entrada em 'resourceChanges' com valor NEGATIVO. (Ex: {characterName: "Alaric", resource: "hp", value: -10}). SEM ISSO O JOGO TRAVA.
+  2. **LOOT REAL**: Se você narrar que um item caiu, foi dropado ou encontrado, você **DEVE** adicionar esse item ao array 'nearbyItems' do JSON.
+  3. **CHECAGEM DE PASSIVAS**: Antes de gerar o texto, leia as "PASSIVAS" listadas acima. Se, por exemplo, um personagem tem "Facilidade em Furtos" e tentou roubar, APLIQUE UM BÔNUS massivo e narre o sucesso facilitado. Se tem "Fúria", dobre o dano se aplicável.
+  4. **SKILLS DE INIMIGOS**: Use as skills listadas para os inimigos para tornar o combate variado.
+
   - **COMÉRCIO**: Se os jogadores comprarem algo (narrado ou sistema), deduza o dinheiro via 'inventoryUpdates' (usando campo 'cost' ou narrando).
   - **NEUTROS**: Gerencie a lista 'activeNeutrals'. Se um civil for atacado, ele pode virar Inimigo (mova para activeEnemies).
   - **CONTINUIDADE**: Lembre-se do tempo anterior.
