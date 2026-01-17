@@ -407,8 +407,8 @@ export const processTurn = async (
     const char = characters.find(c => c.name === p.name);
     const roll = rolls[char?.id || ''];
     // Se o personagem estiver inconsciente (HP <= 0 e permadeath on), a ação vem vazia ou marcada
-    if (!p.action || p.action === "INCONSCIENTE/CAÍDO") {
-        return `PERSONAGEM: ${p.name} está CAÍDO/INCONSCIENTE (HP <= 0) e não pode agir.`;
+    if (!p.action || p.action === "MORTO") {
+        return `PERSONAGEM: ${p.name} está MORTO e não pode agir.`;
     }
 
     if (!char || !roll) return `Ação: ${p.action}`;
@@ -437,10 +437,12 @@ export const processTurn = async (
 
   let extraInstructions = "";
   if (permadeathEnabled) {
-      extraInstructions += `\n**MODO MORTE HABILITADO**:
-      - Personagens com HP <= 0 ficam no estado "CAÍDO" (Inconsciente).
-      - Se ninguém salvar (cura ou teste de medicina) após uma rodada crítica, o personagem MORRE definitivamente.
-      - Se TODOS os jogadores estiverem mortos ou caídos sem aliados para ajudar, defina 'isGameOver: true' e 'gameResult: DEFEAT'.
+      extraInstructions += `\n**MODO MORTE PERMANENTE HABILITADO**:
+      - Personagens com HP > 1 que sofrem dano letal ficam com 1 HP (Sobrevivência/Último Suspiro).
+      - Personagens que JÁ estão com 1 HP e sofrem dano MORREM instantaneamente (HP 0).
+      - Não existe estado "Inconsciente/Caído". Ou está de pé (HP > 0) ou Morto (HP 0).
+      - Narre o evento dramaticamente (Ex: "O golpe seria fatal, mas ele resiste por pura vontade com 1 HP!" ou "O golpe final ceifa sua vida").
+      - Se TODOS os jogadores estiverem mortos, defina 'isGameOver: true' e 'gameResult: DEFEAT'.
       `;
   }
 
@@ -455,44 +457,195 @@ export const processTurn = async (
       systemLogs: { type: Type.ARRAY, items: { type: Type.STRING } },
       isGameOver: { type: Type.BOOLEAN },
       gameResult: { type: Type.STRING, enum: ["VICTORY", "DEFEAT", "ONGOING"] },
-      attributeChanges: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { characterName: { type: Type.STRING }, attribute: { type: Type.STRING }, value: { type: Type.INTEGER }, reason: { type: Type.STRING } }, required: ["characterName", "attribute", "value", "reason"] } },
-      resourceChanges: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { characterName: { type: Type.STRING }, resource: { type: Type.STRING }, value: { type: Type.INTEGER }, reason: { type: Type.STRING } }, required: ["characterName", "resource", "value", "reason"] } },
-      characterStatusUpdates: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { characterName: { type: Type.STRING }, status: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, description: { type: Type.STRING }, duration: { type: Type.INTEGER } }, required: ["name", "description", "duration"] } } }, required: ["characterName", "status"] } },
-      inventoryUpdates: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { characterName: { type: Type.STRING }, action: { type: Type.STRING }, cost: { type: Type.INTEGER }, item: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, description: { type: Type.STRING }, effect: { type: Type.STRING }, type: { type: Type.STRING }, slot: { type: Type.STRING }, price: { type: Type.INTEGER } }, required: ["name", "description", "effect", "type"] } }, required: ["characterName", "action", "item"] } },
-      activeEnemies: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { id: { type: Type.STRING }, name: { type: Type.STRING }, description: { type: Type.STRING }, currentHp: { type: Type.INTEGER }, maxHp: { type: Type.INTEGER }, currentMana: { type: Type.INTEGER }, maxMana: { type: Type.INTEGER }, currentStamina: { type: Type.INTEGER }, maxStamina: { type: Type.INTEGER }, difficulty: { type: Type.STRING }, status: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, description: { type: Type.STRING }, duration: { type: Type.INTEGER } }, required: ["name", "description", "duration"] } }, skills: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, description: { type: Type.STRING }, type: { type: Type.STRING }, level: { type: Type.INTEGER } }, required: ["name", "description", "type", "level"] } } }, required: ["id", "name", "description", "currentHp", "maxHp", "difficulty"] } },
-      activeAllies: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { id: { type: Type.STRING }, name: { type: Type.STRING }, description: { type: Type.STRING }, currentHp: { type: Type.INTEGER }, maxHp: { type: Type.INTEGER }, currentMana: { type: Type.INTEGER }, maxMana: { type: Type.INTEGER }, currentStamina: { type: Type.INTEGER }, maxStamina: { type: Type.INTEGER }, status: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, description: { type: Type.STRING }, duration: { type: Type.INTEGER } }, required: ["name", "description", "duration"] } } }, required: ["id", "name", "description", "currentHp", "maxHp"] } },
+      attributeChanges: { 
+        type: Type.ARRAY, 
+        items: { 
+          type: Type.OBJECT, 
+          properties: { 
+            characterName: { type: Type.STRING }, 
+            attribute: { type: Type.STRING }, 
+            value: { type: Type.INTEGER }, 
+            reason: { type: Type.STRING } 
+          }, 
+          required: ["characterName", "attribute", "value", "reason"] 
+        } 
+      },
+      resourceChanges: { 
+        type: Type.ARRAY, 
+        items: { 
+          type: Type.OBJECT, 
+          properties: { 
+            characterName: { type: Type.STRING }, 
+            resource: { type: Type.STRING }, 
+            value: { type: Type.INTEGER }, 
+            reason: { type: Type.STRING } 
+          }, 
+          required: ["characterName", "resource", "value", "reason"] 
+        } 
+      },
+      characterStatusUpdates: { 
+        type: Type.ARRAY, 
+        items: { 
+          type: Type.OBJECT, 
+          properties: { 
+            characterName: { type: Type.STRING }, 
+            status: { 
+              type: Type.ARRAY, 
+              items: { 
+                type: Type.OBJECT, 
+                properties: { 
+                  name: { type: Type.STRING }, 
+                  description: { type: Type.STRING }, 
+                  duration: { type: Type.INTEGER } 
+                }, 
+                required: ["name", "description", "duration"] 
+              } 
+            } 
+          }, 
+          required: ["characterName", "status"] 
+        } 
+      },
+      inventoryUpdates: { 
+        type: Type.ARRAY, 
+        items: { 
+          type: Type.OBJECT, 
+          properties: { 
+            characterName: { type: Type.STRING }, 
+            action: { type: Type.STRING }, 
+            cost: { type: Type.INTEGER }, 
+            item: { 
+              type: Type.OBJECT, 
+              properties: { 
+                name: { type: Type.STRING }, 
+                description: { type: Type.STRING }, 
+                effect: { type: Type.STRING }, 
+                type: { type: Type.STRING }, 
+                slot: { type: Type.STRING }, 
+                price: { type: Type.INTEGER } 
+              }, 
+              required: ["name", "description", "effect", "type"] 
+            } 
+          }, 
+          required: ["characterName", "action", "item"] 
+        } 
+      },
+      activeEnemies: { 
+        type: Type.ARRAY, 
+        items: { 
+          type: Type.OBJECT, 
+          properties: { 
+            id: { type: Type.STRING }, 
+            name: { type: Type.STRING }, 
+            description: { type: Type.STRING }, 
+            currentHp: { type: Type.INTEGER }, 
+            maxHp: { type: Type.INTEGER }, 
+            currentMana: { type: Type.INTEGER }, 
+            maxMana: { type: Type.INTEGER }, 
+            currentStamina: { type: Type.INTEGER }, 
+            maxStamina: { type: Type.INTEGER }, 
+            difficulty: { type: Type.STRING }, 
+            status: { 
+              type: Type.ARRAY, 
+              items: { 
+                type: Type.OBJECT, 
+                properties: { 
+                  name: { type: Type.STRING }, 
+                  description: { type: Type.STRING }, 
+                  duration: { type: Type.INTEGER } 
+                }, 
+                required: ["name", "description", "duration"] 
+              } 
+            }, 
+            skills: { 
+              type: Type.ARRAY, 
+              items: { 
+                type: Type.OBJECT, 
+                properties: { 
+                  name: { type: Type.STRING }, 
+                  description: { type: Type.STRING }, 
+                  type: { type: Type.STRING }, 
+                  level: { type: Type.INTEGER } 
+                }, 
+                required: ["name", "description", "type", "level"] 
+              } 
+            } 
+          }, 
+          required: ["id", "name", "description", "currentHp", "maxHp", "difficulty"] 
+        } 
+      },
+      activeAllies: { 
+        type: Type.ARRAY, 
+        items: { 
+          type: Type.OBJECT, 
+          properties: { 
+            id: { type: Type.STRING }, 
+            name: { type: Type.STRING }, 
+            description: { type: Type.STRING }, 
+            currentHp: { type: Type.INTEGER }, 
+            maxHp: { type: Type.INTEGER }, 
+            currentMana: { type: Type.INTEGER }, 
+            maxMana: { type: Type.INTEGER }, 
+            currentStamina: { type: Type.INTEGER }, 
+            maxStamina: { type: Type.INTEGER }, 
+            status: { 
+              type: Type.ARRAY, 
+              items: { 
+                type: Type.OBJECT, 
+                properties: { 
+                  name: { type: Type.STRING }, 
+                  description: { type: Type.STRING }, 
+                  duration: { type: Type.INTEGER } 
+                }, 
+                required: ["name", "description", "duration"] 
+              } 
+            } 
+          }, 
+          required: ["id", "name", "description", "currentHp", "maxHp"] 
+        } 
+      },
       activeNeutrals: {
-            type: Type.ARRAY,
-            items: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            id: { type: Type.STRING },
+            name: { type: Type.STRING },
+            description: { type: Type.STRING },
+            role: { type: Type.STRING, enum: ['Merchant', 'Civilian', 'Animal', 'Other'] },
+            currentHp: { type: Type.INTEGER },
+            maxHp: { type: Type.INTEGER },
+            isMerchant: { type: Type.BOOLEAN },
+            shopItems: {
+              type: Type.ARRAY,
+              items: {
                 type: Type.OBJECT,
                 properties: {
-                    id: { type: Type.STRING },
-                    name: { type: Type.STRING },
-                    description: { type: Type.STRING },
-                    role: { type: Type.STRING, enum: ['Merchant', 'Civilian', 'Animal', 'Other'] },
-                    currentHp: { type: Type.INTEGER },
-                    maxHp: { type: Type.INTEGER },
-                    isMerchant: { type: Type.BOOLEAN },
-                    shopItems: {
-                        type: Type.ARRAY,
-                        items: {
-                            type: Type.OBJECT,
-                            properties: {
-                                name: { type: Type.STRING },
-                                description: { type: Type.STRING },
-                                effect: { type: Type.STRING },
-                                type: { type: Type.STRING, enum: ['consumable', 'equipment', 'misc'] },
-                                slot: { type: Type.STRING, enum: ['back', 'chest', 'hands'] },
-                                price: { type: Type.INTEGER }
-                            },
-                            required: ["name", "description", "effect", "type", "price"]
-                        }
-                    },
-                    status: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, description: { type: Type.STRING }, duration: { type: Type.INTEGER } }, required: ["name", "description", "duration"] } }
+                  name: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  effect: { type: Type.STRING },
+                  type: { type: Type.STRING, enum: ['consumable', 'equipment', 'misc'] },
+                  slot: { type: Type.STRING, enum: ['back', 'chest', 'hands'] },
+                  price: { type: Type.INTEGER }
                 },
-                required: ["id", "name", "description", "role", "currentHp", "maxHp", "isMerchant"]
+                required: ["name", "description", "effect", "type", "price"]
+              }
+            },
+            status: { 
+              type: Type.ARRAY, 
+              items: { 
+                type: Type.OBJECT, 
+                properties: { 
+                  name: { type: Type.STRING }, 
+                  description: { type: Type.STRING }, 
+                  duration: { type: Type.INTEGER } 
+                }, 
+                required: ["name", "description", "duration"] 
+              } 
             }
-        },
+          },
+          required: ["id", "name", "description", "role", "currentHp", "maxHp", "isMerchant"]
+        }
+      },
       nearbyItems: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, description: { type: Type.STRING }, effect: { type: Type.STRING }, type: { type: Type.STRING }, slot: { type: Type.STRING }, capacityBonus: { type: Type.INTEGER } }, required: ["name", "description", "effect", "type"] } },
       mapData: { type: Type.OBJECT, properties: { locationName: { type: Type.STRING }, grid: { type: Type.ARRAY, items: { type: Type.ARRAY, items: { type: Type.STRING } } }, legend: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { symbol: { type: Type.STRING }, description: { type: Type.STRING } }, required: ["symbol", "description"] } } }, required: ["locationName", "grid", "legend"] },
       timeData: { type: Type.OBJECT, properties: { dayCount: { type: Type.INTEGER }, phase: { type: Type.STRING, enum: ['DAWN', 'DAY', 'DUSK', 'NIGHT'] }, description: { type: Type.STRING } }, required: ["dayCount", "phase", "description"] }

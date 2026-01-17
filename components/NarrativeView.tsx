@@ -209,8 +209,18 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
       return baseLimit + backpackBonus;
   };
 
+  // Helper to check if character is incapacitated
+  const isIncapacitated = (char: Character) => {
+    return char.derived.hp <= 0;
+  };
+
   const handleTakeItem = (charId: string, item: Item, itemIndex: number) => {
     if (enemies.length > 0) return; // Bloqueado em combate
+    const charToCheck = activeCharacters.find(c => c.id === charId);
+    if (charToCheck && isIncapacitated(charToCheck)) {
+        addLog('Ação Bloqueada', `${charToCheck.name} está morto.`, 'system-info');
+        return;
+    }
 
     setActiveCharacters(prev => prev.map(c => {
         if (c.id === charId) {
@@ -231,6 +241,11 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
 
   const handleDropItem = (charId: string, item: Item, itemIndex: number) => {
     if (enemies.length > 0) return; // Bloqueado em combate
+    const charToCheck = activeCharacters.find(c => c.id === charId);
+    if (charToCheck && isIncapacitated(charToCheck)) {
+        addLog('Ação Bloqueada', `${charToCheck.name} está morto.`, 'system-info');
+        return;
+    }
 
     setActiveCharacters(prev => prev.map(c => {
         if (c.id === charId) {
@@ -247,6 +262,11 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
       const sourceChar = activeCharacters.find(c => c.id === sourceCharId);
       const targetChar = activeCharacters.find(c => c.id === targetCharId);
       if (!sourceChar || !targetChar) return;
+
+      if (isIncapacitated(sourceChar)) {
+         addLog('Ação Bloqueada', `${sourceChar.name} está morto.`, 'system-info');
+         return;
+      }
 
       const itemToGive = sourceChar.items[itemIndex];
       if (!itemToGive) return;
@@ -280,6 +300,11 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
 
   const handleUseItem = (charId: string, item: Item, itemIndex: number) => {
       // Allow consumables in combat (Updated as per request)
+      const charToCheck = activeCharacters.find(c => c.id === charId);
+      if (charToCheck && isIncapacitated(charToCheck)) {
+         addLog('Ação Bloqueada', `${charToCheck.name} está morto.`, 'system-info');
+         return;
+      }
       
       setActiveCharacters(prev => prev.map(c => {
           if (c.id === charId) {
@@ -324,6 +349,11 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
   };
 
   const handleEquipItem = (charId: string, item: Item, itemIndex: number) => {
+      const charToCheck = activeCharacters.find(c => c.id === charId);
+      if (charToCheck && isIncapacitated(charToCheck)) {
+         addLog('Ação Bloqueada', `${charToCheck.name} está morto.`, 'system-info');
+         return;
+      }
       if (!item.slot) return;
       setActiveCharacters(prev => prev.map(c => {
           if (c.id === charId) {
@@ -342,6 +372,11 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
   };
 
   const handleUnequipItem = (charId: string, slot: EquipmentSlot) => {
+      const charToCheck = activeCharacters.find(c => c.id === charId);
+      if (charToCheck && isIncapacitated(charToCheck)) {
+         addLog('Ação Bloqueada', `${charToCheck.name} está morto.`, 'system-info');
+         return;
+      }
       setActiveCharacters(prev => prev.map(c => {
           if (c.id === charId) {
               const item = c.equipment?.[slot];
@@ -362,6 +397,11 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
   };
 
   const handleBuyItem = (charId: string, item: Item, npcId: string) => {
+      const charToCheck = activeCharacters.find(c => c.id === charId);
+      if (charToCheck && isIncapacitated(charToCheck)) {
+         addLog('Ação Bloqueada', `${charToCheck.name} está morto.`, 'system-info');
+         return;
+      }
       if (!item.price) return;
       
       setActiveCharacters(prev => prev.map(c => {
@@ -388,6 +428,11 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
 
   const handleSellItem = (charId: string, item: Item, itemIndex: number) => {
     if (!tradeTarget) return;
+    const charToCheck = activeCharacters.find(c => c.id === charId);
+    if (charToCheck && isIncapacitated(charToCheck)) {
+         addLog('Ação Bloqueada', `${charToCheck.name} está morto.`, 'system-info');
+         return;
+    }
     const sellPrice = Math.floor((item.price || 10) / 2); // Default 5 gold equivalent if no price
     
     setActiveCharacters(prev => prev.map(c => {
@@ -428,7 +473,7 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
     const contentLog = activeCharacters.map(c => {
         const action = actions[c.id];
         if (permadeathEnabled && c.derived.hp <= 0) {
-            return `> **${c.name}**: (CAÍDO/INCONSCIENTE)`;
+            return `> **${c.name}**: (MORTO)`;
         }
         return `> **${c.name}**: ${action || "Aguarda..."}`;
     }).join('\n');
@@ -438,7 +483,7 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
     // Preparar ações para enviar (filtrando ou marcando mortos)
     const actionsToSend = activeCharacters.map(c => ({
         name: c.name,
-        action: (permadeathEnabled && c.derived.hp <= 0) ? "INCONSCIENTE/CAÍDO" : (actions[c.id] || "")
+        action: (permadeathEnabled && c.derived.hp <= 0) ? "MORTO" : (actions[c.id] || "")
     }));
 
     setActions({});
@@ -471,13 +516,35 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
           const charIndex = updatedCharacters.findIndex(c => c.name === change.characterName);
           if (charIndex !== -1) {
               const res = change.resource;
-              // Permite HP negativo se permadeathEnabled para lógica de morte, senão trava em 0
-              let newValue = updatedCharacters[charIndex].derived[res] + change.value;
-              if (!permadeathEnabled) newValue = Math.max(0, newValue);
+              // Nova Lógica de Morte Permanente
+              const currentVal = updatedCharacters[charIndex].derived[res];
+              let newValue = currentVal + change.value;
+
+              if (res === 'hp' && permadeathEnabled) {
+                  if (change.value < 0) { // Dano
+                      if (currentVal > 1 && newValue <= 0) {
+                          // Sobrevive com 1
+                          newValue = 1;
+                          addLog('Mecânica', `${change.characterName} resistiu à morte! (1 HP)`, 'system-info');
+                      } else if (currentVal <= 1 && newValue <= 0) {
+                          // Morte
+                          newValue = 0;
+                          addLog('Morte', `${change.characterName} MORREU.`, 'damage');
+                      } else {
+                        addLog('Sistema', `${change.characterName}: HP ${change.value}`, 'damage');
+                      }
+                  } else {
+                     addLog('Sistema', `${change.characterName}: HP +${change.value}`, 'gain');
+                  }
+              } else {
+                  if (!permadeathEnabled) newValue = Math.max(0, newValue);
+                  if (res !== 'hp') newValue = Math.max(0, newValue); // Mana/Stamina não ficam negativos
+                  addLog('Sistema', `${change.characterName}: ${res.toUpperCase()} ${change.value > 0 ? '+' : ''}${change.value}`, change.value < 0 ? 'damage' : 'gain');
+              }
               
               updatedCharacters[charIndex] = { ...updatedCharacters[charIndex], derived: { ...updatedCharacters[charIndex].derived, [res]: newValue } };
-              addLog('Sistema', `${change.characterName}: ${res.toUpperCase()} ${change.value > 0 ? '+' : ''}${change.value}`, change.value < 0 ? 'damage' : 'gain');
           } else {
+             // Mudança para inimigos/aliados
              addLog('Sistema', `${change.characterName}: ${change.resource.toUpperCase()} ${change.value > 0 ? '+' : ''}${change.value}`, change.value < 0 ? 'damage' : 'gain');
           }
         });
@@ -532,10 +599,9 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
       if (response.timeData) setTimeData(response.timeData);
 
       if (response.mapData) {
-          // Se o local mudou, limpamos os itens do chão que ficaram para trás
+          // Se o local mudou, apenas logamos, mas MANTEMOS os itens no chão
           if (mapData && response.mapData.locationName !== mapData.locationName) {
-              setNearbyItems([]);
-              addLog('Ambiente', 'Nova localização alcançada. Itens anteriores deixados para trás.', 'system-info');
+              addLog('Ambiente', `Nova localização: ${response.mapData.locationName}`, 'system-info');
           }
           setMapData(response.mapData);
       }
@@ -611,10 +677,10 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                                                   {activeCharacters.map(char => (
                                                       <button 
                                                           key={char.id}
-                                                          disabled={char.wealth < (item.price || 99999)}
+                                                          disabled={char.wealth < (item.price || 99999) || isIncapacitated(char)}
                                                           onClick={() => handleBuyItem(char.id, item, tradeTarget.id)}
                                                           className="px-2 py-1 bg-amber-700 hover:bg-amber-600 disabled:bg-slate-800 disabled:opacity-50 text-[10px] text-white rounded font-bold transition-colors w-full truncate"
-                                                          title={`Comprar para ${char.name} (${char.wealth})`}
+                                                          title={`Comprar para ${char.name} (${char.wealth}) ${isIncapacitated(char) ? '- MORTO' : ''}`}
                                                       >
                                                           Comprar ({char.name.substring(0,3)})
                                                       </button>
@@ -646,7 +712,9 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                                                       <div className="text-[10px] text-slate-300 font-bold truncate pr-2">{item.name}</div>
                                                       <button 
                                                           onClick={() => handleSellItem(char.id, item, idx)}
-                                                          className="flex items-center gap-1 px-2 py-1 bg-green-900/30 hover:bg-green-700 text-green-300 border border-green-800 rounded text-[9px] font-bold transition-colors"
+                                                          disabled={isIncapacitated(char)}
+                                                          className="flex items-center gap-1 px-2 py-1 bg-green-900/30 hover:bg-green-700 text-green-300 border border-green-800 rounded text-[9px] font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                          title={isIncapacitated(char) ? "Morto" : "Vender"}
                                                       >
                                                           <DollarSign size={10} /> Vender (+{Math.floor((item.price || 10) / 2)})
                                                       </button>
@@ -722,7 +790,7 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                   <div className="flex items-center justify-between px-2 py-1 mb-1">
                     <div className="text-xs font-bold text-blue-400 flex items-center gap-1">
                         <User size={10} /> {char.name} 
-                        {isDown && <span className="text-red-500 font-bold uppercase ml-2 animate-pulse">[CAÍDO]</span>}
+                        {isDown && <span className="text-red-500 font-bold uppercase ml-2 animate-pulse">[MORTO]</span>}
                     </div>
                     {!isDown && (
                         <div className="relative group/dice">
@@ -734,7 +802,7 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                     )}
                   </div>
                   <textarea 
-                    value={isDown ? "Inconsciente (Precisa de ajuda!)" : (actions[char.id] || '')} 
+                    value={isDown ? "Morto (Fim da jornada)" : (actions[char.id] || '')} 
                     onChange={(e) => setActions(prev => ({ ...prev, [char.id]: e.target.value }))} 
                     placeholder={isDown ? "" : `O que ${char.name} faz?`} 
                     rows={2} 
@@ -924,9 +992,20 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                 <div className="animate-fade-in space-y-6 flex flex-col h-full">
                     {/* Nearby Items / Ground */}
                     <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-800 mb-2 max-h-[180px] overflow-y-auto">
-                        <h4 className="text-xs text-amber-500 font-bold uppercase mb-2 flex items-center gap-2 sticky top-0 bg-slate-900/90 py-1 z-10 backdrop-blur-sm">
-                            <ArrowDownToLine size={14}/> No Chão / Proximidades
-                        </h4>
+                        <div className="flex justify-between items-center mb-2 sticky top-0 bg-slate-900/90 py-1 z-10 backdrop-blur-sm">
+                            <h4 className="text-xs text-amber-500 font-bold uppercase flex items-center gap-2">
+                                <ArrowDownToLine size={14}/> No Chão / Proximidades
+                            </h4>
+                            {nearbyItems.length > 0 && (
+                                <button 
+                                    onClick={() => setNearbyItems([])} 
+                                    className="text-[10px] flex items-center gap-1 text-slate-500 hover:text-red-400 bg-slate-950 border border-slate-800 px-2 py-1 rounded transition-colors"
+                                    title="Limpar itens do chão"
+                                >
+                                    <Trash size={10} /> Limpar
+                                </button>
+                            )}
+                        </div>
                         {nearbyItems.length === 0 ? (
                             <div className="text-[10px] text-slate-600 italic text-center py-2">Nada por aqui...</div>
                         ) : (
@@ -942,9 +1021,9 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                                                 <button 
                                                     key={char.id}
                                                     onClick={(e) => { e.stopPropagation(); handleTakeItem(char.id, item, idx); }}
-                                                    disabled={enemies.length > 0 || char.items.length >= getInventoryLimit(char)}
+                                                    disabled={enemies.length > 0 || char.items.length >= getInventoryLimit(char) || isIncapacitated(char)}
                                                     className="p-1 bg-green-900/30 hover:bg-green-700 text-green-300 rounded border border-green-800 disabled:opacity-30 disabled:cursor-not-allowed"
-                                                    title={`Pegar para ${char.name} ${enemies.length > 0 ? '(Bloqueado em Combate)' : char.items.length >= getInventoryLimit(char) ? '(Mochila Cheia)' : ''}`}
+                                                    title={`Pegar para ${char.name} ${isIncapacitated(char) ? '(Morto)' : enemies.length > 0 ? '(Bloqueado em Combate)' : char.items.length >= getInventoryLimit(char) ? '(Mochila Cheia)' : ''}`}
                                                 >
                                                     <Hand size={10} /> <span className="text-[8px] uppercase font-bold">{char.name.substring(0,3)}</span>
                                                 </button>
@@ -987,8 +1066,9 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                                                         <div className="text-[9px] font-bold text-amber-500 truncate">{equippedItem.name}</div>
                                                         <button 
                                                             onClick={(e) => { e.stopPropagation(); handleUnequipItem(char.id, slot); }}
-                                                            // Permitido em combate
+                                                            disabled={isIncapacitated(char)}
                                                             className="absolute inset-0 bg-red-900/90 text-white opacity-0 group-hover/slot:opacity-100 flex items-center justify-center text-[9px] font-bold transition-opacity disabled:cursor-not-allowed disabled:bg-slate-800 disabled:opacity-50"
+                                                            title={isIncapacitated(char) ? "Morto" : "Desequipar"}
                                                         >
                                                             Desequipar
                                                         </button>
@@ -1016,9 +1096,9 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                                                 {item.type === 'consumable' && (
                                                     <button 
                                                         onClick={(e) => { e.stopPropagation(); handleUseItem(char.id, item, i); }}
-                                                        // Habilitado em combate
+                                                        disabled={isIncapacitated(char)}
                                                         className="p-1 text-slate-500 hover:text-amber-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                                                        title="Usar Item"
+                                                        title={isIncapacitated(char) ? "Morto" : "Usar Item"}
                                                     >
                                                         <Zap size={10} />
                                                     </button>
@@ -1026,9 +1106,9 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                                                 {item.slot && !char.equipment?.[item.slot] && (
                                                     <button 
                                                         onClick={(e) => { e.stopPropagation(); handleEquipItem(char.id, item, i); }}
-                                                        // Permitido em combate
-                                                        className="p-1 text-slate-500 hover:text-blue-400 transition-colors"
-                                                        title="Equipar"
+                                                        disabled={isIncapacitated(char)}
+                                                        className="p-1 text-slate-500 hover:text-blue-400 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                                                        title={isIncapacitated(char) ? "Morto" : "Equipar"}
                                                     >
                                                         <ShieldCheck size={10} />
                                                     </button>
@@ -1041,9 +1121,9 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                                                             e.stopPropagation(); 
                                                             setGivingItem(givingItem?.itemIndex === i && givingItem?.charId === char.id ? null : {charId: char.id, itemIndex: i}); 
                                                         }}
-                                                        disabled={enemies.length > 0}
+                                                        disabled={enemies.length > 0 || isIncapacitated(char)}
                                                         className="p-1 text-slate-500 hover:text-purple-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                                                        title={enemies.length > 0 ? "Troca bloqueada em combate" : "Dar para outro jogador"}
+                                                        title={isIncapacitated(char) ? "Morto" : enemies.length > 0 ? "Troca bloqueada em combate" : "Dar para outro jogador"}
                                                     >
                                                         <Gift size={10} />
                                                     </button>
@@ -1070,9 +1150,9 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
 
                                                 <button 
                                                     onClick={(e) => { e.stopPropagation(); handleDropItem(char.id, item, i); }}
-                                                    disabled={enemies.length > 0}
+                                                    disabled={enemies.length > 0 || isIncapacitated(char)}
                                                     className="p-1 text-slate-500 hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                                                    title={enemies.length > 0 ? "Bloqueado em Combate" : "Jogar no Chão"}
+                                                    title={isIncapacitated(char) ? "Morto" : enemies.length > 0 ? "Bloqueado em Combate" : "Jogar no Chão"}
                                                 >
                                                     <ArrowUpFromLine size={10} />
                                                 </button>
