@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { WorldData } from '../types';
 import { generateWorldPremise } from '../services/geminiService';
 import { Button } from './Button';
-import { Sparkles, Globe2, BookOpen, PenTool, Shuffle, Target, Dices, Info, Skull, UserCog } from 'lucide-react';
+import { Sparkles, Globe2, BookOpen, PenTool, Shuffle, Target, Dices, Info, Skull, UserCog, Hand } from 'lucide-react';
 
 interface WorldSetupProps {
   onWorldCreated: (data: WorldData) => void;
@@ -13,6 +13,8 @@ interface WorldSetupProps {
   setPermadeath: (value: boolean) => void;
   humanGm: boolean;
   setHumanGm: (value: boolean) => void;
+  manualDice: boolean;
+  setManualDice: (value: boolean) => void;
 }
 
 export const WorldSetup: React.FC<WorldSetupProps> = ({ 
@@ -22,7 +24,9 @@ export const WorldSetup: React.FC<WorldSetupProps> = ({
     permadeath,
     setPermadeath,
     humanGm,
-    setHumanGm
+    setHumanGm,
+    manualDice,
+    setManualDice
 }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -121,23 +125,32 @@ export const WorldSetup: React.FC<WorldSetupProps> = ({
       )}
 
       {/* Settings Grid */}
-      <div className="flex flex-wrap justify-center gap-4 w-full max-w-2xl">
+      <div className="flex flex-wrap justify-center gap-4 w-full max-w-3xl">
           <ToggleItem 
               active={karmicDice} 
               onToggle={() => setKarmicDice(!karmicDice)}
               icon={<Dices size={16}/>}
               label="Dados Kármicos"
               colorClass="text-purple-400"
-              description="Equilibra a sorte para evitar sequências extremas de falhas ou sucessos."
+              description="Equilibra a sorte para evitar sequências extremas de falhas ou sucessos (automático)."
           />
           
+          <ToggleItem 
+              active={manualDice} 
+              onToggle={() => setManualDice(!manualDice)}
+              icon={<Hand size={16}/>}
+              label="Dados Manuais"
+              colorClass="text-blue-400"
+              description="Você rola dados físicos e insere o número. Desativa dados automáticos."
+          />
+
           <ToggleItem 
               active={permadeath} 
               onToggle={() => setPermadeath(!permadeath)}
               icon={<Skull size={16}/>}
               label="Morte Permanente"
               colorClass="text-red-500"
-              description="Se o HP chegar a 0, o personagem cai. Se não for salvo, morre definitivamente. Sem respawn."
+              description="Se o HP chegar a 0, o personagem morre definitivamente. Sobrevive com 1 HP uma vez."
           />
 
           <ToggleItem 

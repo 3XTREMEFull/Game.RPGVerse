@@ -14,6 +14,7 @@ interface NarrativeViewProps {
   karmicDiceEnabled?: boolean;
   permadeathEnabled?: boolean;
   humanGmEnabled?: boolean;
+  manualDiceEnabled?: boolean;
   initialMapData?: MapData;
   onStateChange: (hasEnemies: boolean, gameResult: 'victory' | 'defeat' | null) => void;
 }
@@ -93,6 +94,7 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
     karmicDiceEnabled = true,
     permadeathEnabled = false,
     humanGmEnabled = false,
+    manualDiceEnabled = false,
     initialMapData,
     onStateChange
 }) => {
@@ -101,6 +103,7 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
   const [actions, setActions] = useState<Record<string, string>>({});
   const [gmSuggestion, setGmSuggestion] = useState("");
   const [selectedDice, setSelectedDice] = useState<Record<string, DiceType>>({});
+  const [manualRollValues, setManualRollValues] = useState<Record<string, string>>({});
   const [isProcessing, setIsProcessing] = useState(false);
   const [gameResult, setGameResult] = useState<'victory' | 'defeat' | null>(null);
   const [enemies, setEnemies] = useState<Enemy[]>(initialEnemies?.map(e => ({...e, status: e.status || []})) || []);
@@ -188,7 +191,7 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
   const rollDie = (type: DiceType, entityId: string): number => {
     const sides = parseInt(type.substring(1));
     let result = Math.floor(Math.random() * sides) + 1;
-    if (karmicDiceEnabled) {
+    if (karmicDiceEnabled && !manualDiceEnabled) {
         const streak = karmaMap[entityId] || 0;
         if (streak <= -2) result = Math.max(result, Math.floor(Math.random() * sides) + 1);
         else if (streak >= 2) result = Math.min(result, Math.floor(Math.random() * sides) + 1);
@@ -459,14 +462,43 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
   const submitTurn = async () => {
     if (!worldData) return;
     const turnPlayerRolls: Record<string, RollResult> = {};
+    
+    // Validar se dados manuais foram inseridos
+    if (manualDiceEnabled) {
+        for (const c of activeCharacters) {
+            if (permadeathEnabled && c.derived.hp <= 0) continue;
+            
+            // Check if user entered an action but forgot the dice roll
+            if (actions[c.id] && !manualRollValues[c.id]) {
+                alert(`Por favor, insira o valor do dado para ${c.name} (Modo Manual).`);
+                return;
+            }
+        }
+    }
+
     activeCharacters.forEach(c => {
       // Se morte permanente ativa e HP <= 0, não rola dado
       if (permadeathEnabled && c.derived.hp <= 0) return;
 
       const dieType = selectedDice[c.id] || 'D20';
-      const result = rollDie(dieType, c.id);
+      let result = 0;
+
+      if (manualDiceEnabled) {
+         const inputVal = parseInt(manualRollValues[c.id]);
+         if (!isNaN(inputVal)) {
+             result = inputVal;
+         } else {
+             // Fallback or skip if not providing action? 
+             // We validated above, so assume if action exists, value exists. 
+             // If action is empty, maybe roll is irrelevant but we send it anyway.
+             result = 0;
+         }
+      } else {
+         result = rollDie(dieType, c.id);
+      }
+      
       turnPlayerRolls[c.id] = { type: dieType, value: result };
-      addLog(c.name, `Tentativa de Ação`, 'player-roll', result);
+      addLog(c.name, `Ação (${manualDiceEnabled ? 'Manual' : 'Auto'})`, 'player-roll', result);
     });
 
     const activeCharsForStory = activeCharacters.filter(c => !permadeathEnabled || c.derived.hp > 0);
@@ -487,6 +519,7 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
     }));
 
     setActions({});
+    setManualRollValues({}); // Limpa inputs manuais
     setGmSuggestion(""); // Limpa sugestão do GM
     setIsProcessing(true);
     try {
@@ -787,17 +820,33 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
               const isDown = permadeathEnabled && char.derived.hp <= 0;
               return (
                 <div key={char.id} className={`bg-slate-900 border border-slate-800 rounded-lg p-1 ${isDown ? 'opacity-60 grayscale' : ''}`}>
-                  <div className="flex items-center justify-between px-2 py-1 mb-1">
+                  <div className="flex items-center justify-between px-2 py-1 mb-1 flex-wrap gap-2">
                     <div className="text-xs font-bold text-blue-400 flex items-center gap-1">
                         <User size={10} /> {char.name} 
                         {isDown && <span className="text-red-500 font-bold uppercase ml-2 animate-pulse">[MORTO]</span>}
                     </div>
                     {!isDown && (
-                        <div className="relative group/dice">
-                        <select value={selectedDice[char.id] || 'D20'} onChange={(e) => setSelectedDice(prev => ({ ...prev, [char.id]: e.target.value as DiceType }))} className="bg-slate-800 text-amber-500 text-[10px] font-bold py-1 px-2 rounded border border-slate-700 outline-none cursor-pointer appearance-none pr-6 hover:border-amber-500 transition-colors">
-                            {diceOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                        </select>
-                        <ChevronDown size={10} className="absolute right-1 top-1.5 text-amber-500 pointer-events-none" />
+                        <div className="flex items-center gap-2">
+                            <div className="relative group/dice">
+                                <select value={selectedDice[char.id] || 'D20'} onChange={(e) => setSelectedDice(prev => ({ ...prev, [char.id]: e.target.value as DiceType }))} className="bg-slate-800 text-amber-500 text-[10px] font-bold py-1 px-2 rounded border border-slate-700 outline-none cursor-pointer appearance-none pr-6 hover:border-amber-500 transition-colors">
+                                    {diceOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                                </select>
+                                <ChevronDown size={10} className="absolute right-1 top-1.5 text-amber-500 pointer-events-none" />
+                            </div>
+                            
+                            {manualDiceEnabled && (
+                                <div className="relative flex items-center gap-1 bg-slate-950 rounded px-2 py-0.5 border border-slate-700">
+                                    <span className="text-[9px] text-slate-500 uppercase font-bold">Res:</span>
+                                    <input 
+                                        type="number" 
+                                        min="1"
+                                        placeholder="#"
+                                        value={manualRollValues[char.id] || ''}
+                                        onChange={(e) => setManualRollValues(prev => ({...prev, [char.id]: e.target.value}))}
+                                        className="w-10 bg-transparent text-[10px] text-amber-500 font-bold outline-none text-center"
+                                    />
+                                </div>
+                            )}
                         </div>
                     )}
                   </div>
