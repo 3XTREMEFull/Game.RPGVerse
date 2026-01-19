@@ -60,7 +60,7 @@ async function callWithRetry<T>(fn: () => Promise<T>, maxRetries = 3, initialDel
 
       if (shouldRetry) {
         attempt++;
-        const waitTime = isQuotaError ? 10000 : delay; // Espera menos para erros genéricos
+        const waitTime = isQuotaError ? 5000 : delay; // Espera menos para erros genéricos, 5s para quota
         console.warn(`[Gemini Service] Erro detectado (Tentativa ${attempt}). Tipo: ${isJsonError ? 'JSON_PARSE' : isQuotaError ? 'QUOTA/429' : 'GENÉRICO'}. Aguardando ${waitTime}ms...`, error);
         await new Promise(resolve => setTimeout(resolve, waitTime));
         if (!isQuotaError) delay = Math.min(delay * 1.5, 10000); // Backoff menos agressivo
@@ -142,7 +142,8 @@ MAPA & NAVEGAÇÃO:
 • Processo: Decisão Interna -> Rolagem -> Log em 'systemLogs' -> Narração em 'storyText'.
 `;
 
-const MODEL_NAME = "gemini-3-flash-preview";
+// MUDANÇA: Alterado para 'gemini-flash-lite-latest' para otimizar velocidade e evitar erro 429 (Too Many Requests).
+const MODEL_NAME = "gemini-flash-lite-latest";
 
 export const generateWorldPremise = async (manualInput?: string): Promise<WorldData> => {
   const schema: Schema = {
@@ -230,7 +231,6 @@ export const generateCharacterDetails = async (world: WorldData, characterConcep
     required: ["skills", "attributes", "startingItems", "wealth"]
   };
 
-  // OTIMIZAÇÃO: Prompt mais conciso e direto para reduzir o tempo de geração de tokens
   const prompt = `
   Mundo: ${world.premise}
   Moeda: ${world.currencyName}
@@ -422,16 +422,17 @@ export const processTurn = async (
   permadeathEnabled: boolean = false,
   humanGmSuggestion?: string
 ): Promise<TurnResponse> => {
+  // OTIMIZAÇÃO: Contexto abreviado para reduzir tokens
   const context = history.map(h => {
-      if (h.role === 'system') return `[SISTEMA]: ${h.content}`;
-      return `${h.role === 'gm' ? 'GM' : 'JOGADORES'}: ${h.content}`;
-  }).join('\n\n');
+      if (h.role === 'system') return `[SIS]: ${h.content}`;
+      return `${h.role === 'gm' ? 'GM' : 'PCS'}: ${h.content}`;
+  }).join('\n');
   
   // Construct Character Passive/Active Skill Context explicitly
   const characterSkillsContext = characters.map(c => {
-      const activeSkills = c.skills.filter(s => s.type === 'active').map(s => `- [ATIVA] ${s.name}: ${s.description}`).join('\n');
-      const passiveSkills = c.skills.filter(s => s.type === 'passive').map(s => `- [PASSIVA] ${s.name}: ${s.description}`).join('\n');
-      return `PERSONAGEM: ${c.name}\n${activeSkills}\n${passiveSkills}`;
+      const activeSkills = c.skills.filter(s => s.type === 'active').map(s => `- [A] ${s.name}: ${s.description}`).join('\n');
+      const passiveSkills = c.skills.filter(s => s.type === 'passive').map(s => `- [P] ${s.name}: ${s.description}`).join('\n');
+      return `PC: ${c.name}\n${activeSkills}\n${passiveSkills}`;
   }).join('\n\n');
 
   // Construct Enemy Skill Context explicitly
@@ -447,7 +448,7 @@ export const processTurn = async (
     const roll = rolls[char?.id || ''];
     // Se o personagem estiver inconsciente (HP <= 0 e permadeath on), a ação vem vazia ou marcada
     if (!p.action || p.action === "MORTO") {
-        return `PERSONAGEM: ${p.name} está MORTO e não pode agir.`;
+        return `PC ${p.name}: MORTO.`;
     }
 
     if (!char || !roll) return `Ação: ${p.action}`;
@@ -459,19 +460,19 @@ export const processTurn = async (
         ? `[ITEM EQUIPADO: "${handsItem.name}". EFEITO: "${handsItem.effect}"]` 
         : "[MÃOS VAZIAS]";
     
-    return `PERSONAGEM: ${p.name}\n- AÇÃO: "${p.action}"\n- DADO: ${roll.type}(${roll.value})\n- ${handsInfo}\n- ATRIBUTOS: ${stats}\n- DINHEIRO: ${char.wealth} ${world.currencyName}`;
+    return `PC: ${p.name}\n- AÇÃO: "${p.action}"\n- DADO: ${roll.type}(${roll.value})\n- ${handsInfo}\n- ATRIBUTOS: ${stats}\n- $: ${char.wealth}`;
   }).join('\n\n');
 
   const enemyContext = currentEnemies.length > 0 
-    ? `INIMIGOS ATIVOS: ${currentEnemies.map(e => `- ${e.name} (${e.difficulty}, HP:${e.currentHp})`).join('\n')}`
-    : "NENHUM INIMIGO.";
+    ? `INIMIGOS: ${currentEnemies.map(e => `- ${e.name} (${e.difficulty}, HP:${e.currentHp})`).join('\n')}`
+    : "SEM INIMIGOS.";
 
   const neutralContext = currentNeutrals.length > 0
-    ? `NEUTROS ATIVOS: ${currentNeutrals.map(n => `- ${n.name} (${n.role}, Merchant:${n.isMerchant})`).join('\n')}`
-    : "NENHUM NEUTRO.";
+    ? `NEUTROS: ${currentNeutrals.map(n => `- ${n.name} (${n.role}, Merc:${n.isMerchant})`).join('\n')}`
+    : "SEM NEUTROS.";
 
   const timeContext = currentTime 
-    ? `TEMPO ATUAL: Dia ${currentTime.dayCount}, Fase: ${currentTime.phase} (${currentTime.description}).`
+    ? `TEMPO: Dia ${currentTime.dayCount}, ${currentTime.phase} (${currentTime.description}).`
     : "TEMPO: Inicio.";
 
   let extraInstructions = "";
@@ -486,7 +487,7 @@ export const processTurn = async (
   }
 
   if (humanGmSuggestion) {
-      extraInstructions += `\n**SUGESTÃO DO GM HUMANO (PRIORIDADE MÁXIMA)**: O GM humano instruiu: "${humanGmSuggestion}". Você DEVE incorporar essa sugestão na narrativa da próxima cena, criando os inimigos, eventos ou itens que o GM solicitou, mas mantendo as regras de dados e atributos.`;
+      extraInstructions += `\n**SUGESTÃO DO GM HUMANO (PRIORIDADE)**: O GM humano instruiu: "${humanGmSuggestion}". Você DEVE incorporar essa sugestão na narrativa da próxima cena, criando os inimigos, eventos ou itens que o GM solicitou, mas mantendo as regras de dados e atributos.`;
   }
 
   const schema: Schema = {
@@ -697,17 +698,17 @@ export const processTurn = async (
   Moeda: ${world.currencyName}
 
   ${timeContext}
-  AVANÇO DO TEMPO: Baseado nas ações e narrativa, avance o tempo de forma lógica (ex: Tarde -> Noite). Se passaram a noite em algum lugar, avance o dia.
+  AVANÇO DO TEMPO: Baseado nas ações e narrativa, avance o tempo de forma lógica.
   
   ${extraInstructions}
 
-  CONTEXTO DE HABILIDADES (PASSIVAS E ATIVAS):
+  CONTEXTO DE HABILIDADES:
   ${characterSkillsContext}
 
   ${enemySkillsContext}
 
-  HISTÓRICO RECENTE:
-  ${context.slice(-8000)} 
+  HISTÓRICO RECENTE (Otimizado):
+  ${context.slice(-4000)} 
 
   CONTEXTO ATUAL:
   ${enemyContext}
@@ -719,12 +720,11 @@ export const processTurn = async (
   INSTRUÇÕES CRÍTICAS (PARA CORRIGIR BUGS):
   1. **DANO REAL**: Se você narrar que um inimigo atacou e feriu um personagem (ou vice-versa), você **DEVE** adicionar uma entrada em 'resourceChanges' com valor NEGATIVO. (Ex: {characterName: "Alaric", resource: "hp", value: -10}). SEM ISSO O JOGO TRAVA.
   2. **LOOT REAL**: Se você narrar que um item caiu, foi dropado ou encontrado, você **DEVE** adicionar esse item ao array 'nearbyItems' do JSON.
-  3. **CHECAGEM DE PASSIVAS**: Antes de gerar o texto, leia as "PASSIVAS" listadas acima. Se, por exemplo, um personagem tem "Facilidade em Furtos" e tentou roubar, APLIQUE UM BÔNUS massivo e narre o sucesso facilitado. Se tem "Fúria", dobre o dano se aplicável.
+  3. **CHECAGEM DE PASSIVAS**: Antes de gerar o texto, leia as "PASSIVAS" listadas acima.
   4. **SKILLS DE INIMIGOS**: Use as skills listadas para os inimigos para tornar o combate variado.
 
-  - **COMÉRCIO**: Se os jogadores comprarem algo (narrado ou sistema), deduza o dinheiro via 'inventoryUpdates' (usando campo 'cost' ou narrando).
-  - **NEUTROS**: Gerencie a lista 'activeNeutrals'. Se um civil for atacado, ele pode virar Inimigo (mova para activeEnemies).
-  - **CONTINUIDADE**: Lembre-se do tempo anterior.
+  - **COMÉRCIO**: Se os jogadores comprarem algo, deduza o dinheiro via 'inventoryUpdates' (campo 'cost').
+  - **NEUTROS**: Gerencie a lista 'activeNeutrals'.
   - **MAPA OBRIGATÓRIO**.
   `;
 
