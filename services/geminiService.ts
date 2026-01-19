@@ -2,7 +2,26 @@
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { WorldData, Character, NarrativeTurn, Skill, Attributes, RollResult, TurnResponse, DerivedStats, ResourceChange, Item, Enemy, MapData, StatusEffect, CharacterStatusUpdate, Ally, TimeData, NeutralNPC } from "../types";
 
-const API_KEY = process.env.API_KEY || '';
+// Helper function to safely get the API Key in various environments (Vite, Next.js, Node, etc.)
+const getApiKey = (): string => {
+  // 1. Try standard Node/Process env (common in local dev or specific builds)
+  if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
+    return process.env.API_KEY;
+  }
+
+  // 2. Try Vite environment (Standard for React on Vercel)
+  // @ts-ignore
+  if (typeof import.meta !== 'undefined' && import.meta.env) {
+    // @ts-ignore
+    if (import.meta.env.VITE_API_KEY) return import.meta.env.VITE_API_KEY;
+    // @ts-ignore
+    if (import.meta.env.API_KEY) return import.meta.env.API_KEY;
+  }
+
+  return '';
+};
+
+const API_KEY = getApiKey();
 
 const ai = new GoogleGenAI({ apiKey: API_KEY });
 
@@ -13,9 +32,14 @@ async function callWithRetry<T>(fn: () => Promise<T>, maxRetries = 5, initialDel
 
   while (true) {
     try {
+      if (!API_KEY) throw new Error("API Key is missing. Please check your Vercel Environment Variables (Should be VITE_API_KEY).");
       return await fn();
     } catch (error: any) {
       const errorMessage = error?.message || JSON.stringify(error);
+      
+      // Se o erro for falta de chave, não adianta tentar de novo
+      if (errorMessage.includes("API Key is missing")) throw error;
+
       const isQuotaError = errorMessage.includes('429') || 
                            errorMessage.includes('quota') || 
                            errorMessage.includes('resource exhausted') ||
