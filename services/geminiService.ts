@@ -52,7 +52,7 @@ async function callWithRetry<T>(fn: () => Promise<T>, maxRetries = 3, initialDel
       
       const isQuotaError = errorMessage.includes('429') || 
                            errorMessage.includes('quota') || 
-                           errorMessage.includes('resource exhausted') ||
+                           errorMessage.includes('resource exhausted') || 
                            errorMessage.includes('Too Many Requests') ||
                            errorMessage.includes('user has exceeded quota');
 
@@ -230,14 +230,18 @@ export const generateCharacterDetails = async (world: WorldData, characterConcep
     required: ["skills", "attributes", "startingItems", "wealth"]
   };
 
+  // OTIMIZAÇÃO: Prompt mais conciso e direto para reduzir o tempo de geração de tokens
   const prompt = `
   Mundo: ${world.premise}
   Moeda: ${world.currencyName}
-  Conceito do Personagem: ${characterConcept}
+  Conceito: ${characterConcept}
   
-  Gere atributos equilibrados (1-5), 4 habilidades temáticas, 3 itens iniciais e o dinheiro inicial (${world.currencyName}) apropriado para o status do personagem.
-  IMPORTANTE:
-  - Gere pelo menos 1 item com slot='hands'.
+  Tarefa Rápida: Gere os dados mecânicos para este personagem em JSON.
+  - DESCRIÇÕES CURTAS e diretas (máx 12 palavras). Não escreva histórias longas nas descrições.
+  - Atributos equilibrados (1-5).
+  - 4 Habilidades simples e funcionais.
+  - 3 Itens Iniciais (Pelo menos 1 arma/foco em slot='hands').
+  - Riqueza inicial compatível.
   `;
 
   return callWithRetry(async () => {
