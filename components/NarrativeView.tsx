@@ -11,12 +11,23 @@ interface NarrativeViewProps {
   worldData?: WorldData;
   initialEnemies?: Enemy[];
   initialAllies?: Ally[];
+  initialNeutrals?: NeutralNPC[];
+  initialTimeData?: TimeData;
   karmicDiceEnabled?: boolean;
   permadeathEnabled?: boolean;
   humanGmEnabled?: boolean;
   manualDiceEnabled?: boolean;
   initialMapData?: MapData;
   onStateChange: (hasEnemies: boolean, gameResult: 'victory' | 'defeat' | null) => void;
+  onGameStateUpdate: (
+    history: NarrativeTurn[], 
+    characters: Character[], 
+    enemies: Enemy[], 
+    allies: Ally[], 
+    neutrals: NeutralNPC[], 
+    mapData: MapData | undefined, 
+    timeData: TimeData
+  ) => void;
 }
 
 interface MechanicLog {
@@ -91,12 +102,15 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
     worldData, 
     initialEnemies,
     initialAllies,
+    initialNeutrals,
+    initialTimeData,
     karmicDiceEnabled = true,
     permadeathEnabled = false,
     humanGmEnabled = false,
     manualDiceEnabled = false,
     initialMapData,
-    onStateChange
+    onStateChange,
+    onGameStateUpdate
 }) => {
   const [activeCharacters, setActiveCharacters] = useState<Character[]>(initialCharacters.map(c => ({...c, status: c.status || [], equipment: c.equipment || {}, wealth: c.wealth || 0})));
   const [history, setHistory] = useState<NarrativeTurn[]>(initialHistory);
@@ -108,13 +122,13 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
   const [gameResult, setGameResult] = useState<'victory' | 'defeat' | null>(null);
   const [enemies, setEnemies] = useState<Enemy[]>(initialEnemies?.map(e => ({...e, status: e.status || []})) || []);
   const [activeAllies, setActiveAllies] = useState<Ally[]>(initialAllies?.map(a => ({...a, status: a.status || []})) || []);
-  const [activeNeutrals, setActiveNeutrals] = useState<NeutralNPC[]>([]); // New state for Neutrals
+  const [activeNeutrals, setActiveNeutrals] = useState<NeutralNPC[]>(initialNeutrals || []);
   const [nearbyItems, setNearbyItems] = useState<Item[]>([]); 
   const [activeTab, setActiveTab] = useState<'entities' | 'map' | 'character' | 'inventory' | 'logs'>('entities');
   const [mechanicLogs, setMechanicLogs] = useState<MechanicLog[]>([]);
   const [mapData, setMapData] = useState<MapData | null>(initialMapData || null);
   const [karmaMap, setKarmaMap] = useState<Record<string, number>>({});
-  const [timeData, setTimeData] = useState<TimeData>({ dayCount: 1, phase: 'DAY', description: 'O dia começa...' });
+  const [timeData, setTimeData] = useState<TimeData>(initialTimeData || { dayCount: 1, phase: 'DAY', description: 'O dia começa...' });
   
   // Trade Modal State
   const [tradeTarget, setTradeTarget] = useState<NeutralNPC | null>(null);
@@ -128,6 +142,19 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
   const bottomRef = useRef<HTMLDivElement>(null);
   const logsBottomRef = useRef<HTMLDivElement>(null);
   const diceOptions: DiceType[] = ['D4', 'D6', 'D8', 'D10', 'D12', 'D20', 'D100'];
+
+  // Sincroniza o estado com o App pai sempre que houver mudanças críticas
+  useEffect(() => {
+    onGameStateUpdate(
+        history,
+        activeCharacters,
+        enemies,
+        activeAllies,
+        activeNeutrals,
+        mapData || undefined,
+        timeData
+    );
+  }, [history, activeCharacters, enemies, activeAllies, activeNeutrals, mapData, timeData]);
 
   // Atualiza a música inicial
   useEffect(() => {
@@ -625,12 +652,19 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
       }
       setActiveCharacters(updatedCharacters);
       
-      if (response.activeEnemies) setEnemies(response.activeEnemies.map(e => ({...e, status: e.status || []})));
-      if (response.activeAllies) setActiveAllies(response.activeAllies.map(a => ({...a, status: a.status || []})));
-      if (response.activeNeutrals) setActiveNeutrals(response.activeNeutrals);
+      const newEnemies = response.activeEnemies ? response.activeEnemies.map(e => ({...e, status: e.status || []})) : [];
+      if (response.activeEnemies) setEnemies(newEnemies);
       
-      if (response.timeData) setTimeData(response.timeData);
+      const newAllies = response.activeAllies ? response.activeAllies.map(a => ({...a, status: a.status || []})) : [];
+      if (response.activeAllies) setActiveAllies(newAllies);
+      
+      const newNeutrals = response.activeNeutrals || [];
+      if (response.activeNeutrals) setActiveNeutrals(newNeutrals);
+      
+      const newTimeData = response.timeData || timeData;
+      if (response.timeData) setTimeData(newTimeData);
 
+      const newMapData = response.mapData || mapData;
       if (response.mapData) {
           // Se o local mudou, apenas logamos, mas MANTEMOS os itens no chão
           if (mapData && response.mapData.locationName !== mapData.locationName) {

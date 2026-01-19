@@ -25,8 +25,15 @@ const API_KEY = getApiKey();
 
 const ai = new GoogleGenAI({ apiKey: API_KEY });
 
+// Função para limpar JSON formatado com Markdown (```json ... ```)
+const cleanJson = (text: string): string => {
+  if (!text) return "{}";
+  // Remove marcadores de código markdown no início e fim
+  return text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+};
+
 // Função helper para tentar reconectar automaticamente em caso de falha
-async function callWithRetry<T>(fn: () => Promise<T>, maxRetries = 5, initialDelay = 2000): Promise<T> {
+async function callWithRetry<T>(fn: () => Promise<T>, maxRetries = 3, initialDelay = 2000): Promise<T> {
   let attempt = 0;
   let delay = initialDelay;
 
@@ -40,22 +47,25 @@ async function callWithRetry<T>(fn: () => Promise<T>, maxRetries = 5, initialDel
       // Se o erro for falta de chave, não adianta tentar de novo
       if (errorMessage.includes("API Key is missing")) throw error;
 
+      // Se for erro de parse JSON, tenta de novo pois a IA pode ter alucinado o formato
+      const isJsonError = errorMessage.includes('JSON') || errorMessage.includes('SyntaxError');
+      
       const isQuotaError = errorMessage.includes('429') || 
                            errorMessage.includes('quota') || 
                            errorMessage.includes('resource exhausted') ||
                            errorMessage.includes('Too Many Requests') ||
                            errorMessage.includes('user has exceeded quota');
 
-      const shouldRetry = isQuotaError || attempt < maxRetries;
+      const shouldRetry = isQuotaError || isJsonError || attempt < maxRetries;
 
       if (shouldRetry) {
         attempt++;
-        const waitTime = isQuotaError ? 15000 : delay;
-        console.warn(`[Gemini Service] Erro detectado (Tentativa ${attempt}). Tipo: ${isQuotaError ? 'QUOTA/429' : 'GENÉRICO'}. Aguardando ${waitTime}ms...`, error);
+        const waitTime = isQuotaError ? 10000 : delay; // Espera menos para erros genéricos
+        console.warn(`[Gemini Service] Erro detectado (Tentativa ${attempt}). Tipo: ${isJsonError ? 'JSON_PARSE' : isQuotaError ? 'QUOTA/429' : 'GENÉRICO'}. Aguardando ${waitTime}ms...`, error);
         await new Promise(resolve => setTimeout(resolve, waitTime));
-        if (!isQuotaError) delay = Math.min(delay * 2, 30000);
+        if (!isQuotaError) delay = Math.min(delay * 1.5, 10000); // Backoff menos agressivo
       } else {
-        console.error("Máximo de tentativas excedido para erro genérico.");
+        console.error("Máximo de tentativas excedido.", error);
         throw error;
       }
     }
@@ -165,7 +175,7 @@ export const generateWorldPremise = async (manualInput?: string): Promise<WorldD
     });
 
     if (!response.text) throw new Error("Resposta vazia da IA");
-    return JSON.parse(response.text) as WorldData;
+    return JSON.parse(cleanJson(response.text)) as WorldData;
   });
 };
 
@@ -243,7 +253,8 @@ export const generateCharacterDetails = async (world: WorldData, characterConcep
 
     if (!response.text) throw new Error("Resposta vazia da IA");
 
-    const data = JSON.parse(response.text) as { skills: Skill[], attributes: Attributes, startingItems: Item[], wealth: number };
+    const jsonString = cleanJson(response.text);
+    const data = JSON.parse(jsonString) as { skills: Skill[], attributes: Attributes, startingItems: Item[], wealth: number };
     
     const derived: DerivedStats = {
       hp: 10 + (data.attributes.CON * 5),
@@ -390,7 +401,7 @@ export const startNarrative = async (world: WorldData, characters: Character[]):
     });
 
     if (!response.text) throw new Error("Resposta vazia da IA");
-    return JSON.parse(response.text) as { storyText: string; activeEnemies: Enemy[]; activeAllies: Ally[]; activeNeutrals: NeutralNPC[]; mapData: MapData; timeData: TimeData };
+    return JSON.parse(cleanJson(response.text)) as { storyText: string; activeEnemies: Enemy[]; activeAllies: Ally[]; activeNeutrals: NeutralNPC[]; mapData: MapData; timeData: TimeData };
   });
 };
 
@@ -725,6 +736,6 @@ export const processTurn = async (
     });
 
     if (!response.text) throw new Error("Resposta vazia da IA");
-    return JSON.parse(response.text) as TurnResponse;
+    return JSON.parse(cleanJson(response.text)) as TurnResponse;
   });
 };

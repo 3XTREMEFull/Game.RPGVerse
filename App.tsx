@@ -1,6 +1,6 @@
 
-import React, { useState } from 'react';
-import { GamePhase, WorldData, Character, NarrativeTurn, Enemy, MapData, Ally } from './types';
+import React, { useState, useEffect } from 'react';
+import { GamePhase, WorldData, Character, NarrativeTurn, Enemy, MapData, Ally, TimeData, NeutralNPC } from './types';
 import { WorldSetup } from './components/WorldSetup';
 import { CharacterCreation } from './components/CharacterCreation';
 import { NarrativeView } from './components/NarrativeView';
@@ -8,23 +8,84 @@ import { startNarrative } from './services/geminiService';
 import { AudioController, MusicTrack } from './components/AudioController';
 import { Scroll, Users, Map, Dices, Skull, UserCog, Hand } from 'lucide-react';
 
+const STORAGE_KEY = 'rpgverse_state_v1';
+
+interface SavedState {
+  phase: GamePhase;
+  worldData: WorldData | null;
+  characters: Character[];
+  narrativeHistory: NarrativeTurn[];
+  initialEnemies: Enemy[];
+  initialAllies: Ally[];
+  initialNeutrals: NeutralNPC[];
+  initialMapData: MapData | undefined;
+  initialTimeData: TimeData | undefined;
+  karmicDiceEnabled: boolean;
+  permadeathEnabled: boolean;
+  humanGmEnabled: boolean;
+  manualDiceEnabled: boolean;
+}
+
 const App: React.FC = () => {
-  const [phase, setPhase] = useState<GamePhase>(GamePhase.SETUP);
-  const [worldData, setWorldData] = useState<WorldData | null>(null);
-  const [characters, setCharacters] = useState<Character[]>([]);
-  const [narrativeHistory, setNarrativeHistory] = useState<NarrativeTurn[]>([]);
-  const [initialEnemies, setInitialEnemies] = useState<Enemy[]>([]);
-  const [initialAllies, setInitialAllies] = useState<Ally[]>([]);
-  const [initialMapData, setInitialMapData] = useState<MapData | undefined>(undefined);
+  // Inicialização Lazy do State via LocalStorage
+  const loadState = (): SavedState | null => {
+      try {
+          const saved = localStorage.getItem(STORAGE_KEY);
+          return saved ? JSON.parse(saved) : null;
+      } catch (e) {
+          console.error("Erro ao carregar save:", e);
+          return null;
+      }
+  };
+
+  const savedState = loadState();
+
+  const [phase, setPhase] = useState<GamePhase>(savedState?.phase || GamePhase.SETUP);
+  const [worldData, setWorldData] = useState<WorldData | null>(savedState?.worldData || null);
+  const [characters, setCharacters] = useState<Character[]>(savedState?.characters || []);
+  const [narrativeHistory, setNarrativeHistory] = useState<NarrativeTurn[]>(savedState?.narrativeHistory || []);
+  const [initialEnemies, setInitialEnemies] = useState<Enemy[]>(savedState?.initialEnemies || []);
+  const [initialAllies, setInitialAllies] = useState<Ally[]>(savedState?.initialAllies || []);
+  const [initialNeutrals, setInitialNeutrals] = useState<NeutralNPC[]>(savedState?.initialNeutrals || []);
+  const [initialMapData, setInitialMapData] = useState<MapData | undefined>(savedState?.initialMapData);
+  const [initialTimeData, setInitialTimeData] = useState<TimeData | undefined>(savedState?.initialTimeData);
+  
   const [loadingStory, setLoadingStory] = useState(false);
   
   // Settings State
-  const [karmicDiceEnabled, setKarmicDiceEnabled] = useState(true);
-  const [permadeathEnabled, setPermadeathEnabled] = useState(false);
-  const [humanGmEnabled, setHumanGmEnabled] = useState(false);
-  const [manualDiceEnabled, setManualDiceEnabled] = useState(false);
+  const [karmicDiceEnabled, setKarmicDiceEnabled] = useState(savedState?.karmicDiceEnabled ?? true);
+  const [permadeathEnabled, setPermadeathEnabled] = useState(savedState?.permadeathEnabled ?? false);
+  const [humanGmEnabled, setHumanGmEnabled] = useState(savedState?.humanGmEnabled ?? false);
+  const [manualDiceEnabled, setManualDiceEnabled] = useState(savedState?.manualDiceEnabled ?? false);
 
   const [musicTrack, setMusicTrack] = useState<MusicTrack>('MENU');
+
+  // Efeito para Salvar no LocalStorage sempre que algo relevante mudar
+  useEffect(() => {
+    const stateToSave: SavedState = {
+        phase,
+        worldData,
+        characters,
+        narrativeHistory,
+        initialEnemies,
+        initialAllies,
+        initialNeutrals,
+        initialMapData,
+        initialTimeData,
+        karmicDiceEnabled,
+        permadeathEnabled,
+        humanGmEnabled,
+        manualDiceEnabled
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToSave));
+  }, [phase, worldData, characters, narrativeHistory, initialEnemies, initialAllies, initialNeutrals, initialMapData, initialTimeData, karmicDiceEnabled, permadeathEnabled, humanGmEnabled, manualDiceEnabled]);
+
+  const handleResetGame = () => {
+      if (confirm("Deseja voltar à tela inicial? Todo o progresso não salvo será perdido e o jogo será resetado.")) {
+          localStorage.removeItem(STORAGE_KEY);
+          window.location.reload();
+      }
+  };
 
   // Transition: Setup -> Character Creation
   const handleWorldCreated = (data: WorldData) => {
@@ -46,7 +107,9 @@ const App: React.FC = () => {
       ]);
       setInitialEnemies(result.activeEnemies || []);
       setInitialAllies(result.activeAllies || []);
+      setInitialNeutrals(result.activeNeutrals || []);
       setInitialMapData(result.mapData);
+      setInitialTimeData(result.timeData);
       setPhase(GamePhase.NARRATIVE);
       
       // Initial music state for narrative
@@ -76,6 +139,25 @@ const App: React.FC = () => {
     }
   };
 
+  // Callback chamado pelo NarrativeView para atualizar o estado global e persistir
+  const handleGameStateUpdate = (
+      newHistory: NarrativeTurn[], 
+      newCharacters: Character[], 
+      newEnemies: Enemy[], 
+      newAllies: Ally[], 
+      newNeutrals: NeutralNPC[],
+      newMapData: MapData | undefined, 
+      newTimeData: TimeData
+  ) => {
+      setNarrativeHistory(newHistory);
+      setCharacters(newCharacters);
+      setInitialEnemies(newEnemies);
+      setInitialAllies(newAllies);
+      setInitialNeutrals(newNeutrals);
+      setInitialMapData(newMapData);
+      setInitialTimeData(newTimeData);
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 flex flex-col">
       <AudioController track={musicTrack} />
@@ -83,8 +165,12 @@ const App: React.FC = () => {
       {/* Header */}
       <header className="bg-slate-900 border-b border-slate-800 p-4 sticky top-0 z-50 shadow-md">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="bg-amber-600 p-2 rounded-lg text-white">
+          <div 
+            className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity"
+            onClick={handleResetGame}
+            title="Clique para Voltar ao Início (Resetar Jogo)"
+          >
+            <div className="bg-amber-600 p-2 rounded-lg text-white shadow-lg shadow-amber-900/50">
               <Scroll size={24} />
             </div>
             <h1 className="text-xl md:text-2xl font-bold font-cinzel text-amber-100 tracking-wider">
@@ -151,12 +237,15 @@ const App: React.FC = () => {
             worldData={worldData || undefined}
             initialEnemies={initialEnemies}
             initialAllies={initialAllies}
+            initialNeutrals={initialNeutrals}
+            initialTimeData={initialTimeData}
+            initialMapData={initialMapData}
             karmicDiceEnabled={karmicDiceEnabled}
             permadeathEnabled={permadeathEnabled}
             humanGmEnabled={humanGmEnabled}
             manualDiceEnabled={manualDiceEnabled}
-            initialMapData={initialMapData}
             onStateChange={handleNarrativeStateChange}
+            onGameStateUpdate={handleGameStateUpdate}
           />
         )}
       </main>
