@@ -140,6 +140,7 @@ MAPA & NAVEGAÇÃO:
 2. SISTEMA DE ROLAGEM AUTOMÁTICA E SEPARAÇÃO
 • Ação: Você deve executar internamente todas as rolagens necessárias para o jogo.
 • Processo: Decisão Interna -> Rolagem -> Log em 'systemLogs' -> Narração em 'storyText'.
+• **PROIBIDO NARRAR DADOS**: NUNCA escreva os valores dos dados (ex: "(D20: 15)", "Rolou 12") no 'storyText'. Apenas descreva o resultado da ação (sucesso, falha, impacto).
 `;
 
 // MUDANÇA: Alterado para 'gemini-flash-lite-latest' para otimizar velocidade e evitar erro 429 (Too Many Requests).
@@ -726,6 +727,7 @@ export const processTurn = async (
   - **COMÉRCIO**: Se os jogadores comprarem algo, deduza o dinheiro via 'inventoryUpdates' (campo 'cost').
   - **NEUTROS**: Gerencie a lista 'activeNeutrals'.
   - **MAPA OBRIGATÓRIO**.
+  - **SEM DADOS NO TEXTO**: Não escreva "(D20: X)" ou valores numéricos de rolagem na história.
   `;
 
   return callWithRetry(async () => {
