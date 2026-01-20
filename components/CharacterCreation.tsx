@@ -1,9 +1,9 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { WorldData, Character, Skill, Attributes, DerivedStats, Item } from '../types';
 import { generateCharacterDetails } from '../services/geminiService';
 import { Button } from './Button';
-import { UserPlus, Shield, Zap, Heart, Trash2, Stars, CheckCircle, Dna, Activity, Target, Flame, Droplets, Backpack, Coins } from 'lucide-react';
+import { UserPlus, Shield, Zap, Heart, Trash2, Stars, CheckCircle, Dna, Activity, Target, Flame, Droplets, Backpack, Coins, Plus, Minus, Shuffle, PenTool } from 'lucide-react';
 
 interface CharacterCreationProps {
   world: WorldData;
@@ -14,6 +14,10 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({ world, onC
   const [characters, setCharacters] = useState<Character[]>([]);
   const [formData, setFormData] = useState<Partial<Character>>({});
   
+  // Creation Mode State
+  const [creationMode, setCreationMode] = useState<'auto' | 'manual'>('auto');
+  const [pointsPool, setPointsPool] = useState(16); // 24 Total - 8 (Base 1 per stat) = 16 to spend
+
   // States for Details Generation
   const [generatedSkills, setGeneratedSkills] = useState<Skill[]>([]);
   const [generatedAttributes, setGeneratedAttributes] = useState<Attributes | null>(null);
@@ -27,6 +31,15 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({ world, onC
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  // Recalculate derived stats locally (Client-side logic mirroring server logic)
+  const calculateDerived = (attrs: Attributes): DerivedStats => {
+      return {
+          hp: 10 + (attrs.CON * 5),
+          stamina: 5 + (attrs.FOR + attrs.AGI) * 2,
+          mana: 5 + (attrs.INT * 3)
+      };
   };
 
   const handleGenerateDetails = async () => {
@@ -47,11 +60,25 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({ world, onC
     try {
       const details = await generateCharacterDetails(world, formData.concept);
       if (details.skills.length === 0) throw new Error("Falha ao gerar detalhes.");
+      
       setGeneratedSkills(details.skills);
-      setGeneratedAttributes(details.attributes);
-      setGeneratedDerived(details.derived);
       setGeneratedItems(details.startingItems);
       setGeneratedWealth(details.wealth);
+      
+      if (creationMode === 'auto') {
+          // Use AI generated stats
+          setGeneratedAttributes(details.attributes);
+          setGeneratedDerived(details.derived);
+      } else {
+          // Manual Mode: Reset to base stats (1 all)
+          const baseAttrs: Attributes = {
+              FOR: 1, DES: 1, CON: 1, INT: 1, SAB: 1, CAR: 1, AGI: 1, SOR: 1
+          };
+          setGeneratedAttributes(baseAttrs);
+          setPointsPool(16); // Reset pool
+          setGeneratedDerived(calculateDerived(baseAttrs));
+      }
+
       // Auto-select first 2 skills for convenience, but allow change
       setSelectedSkills(details.skills.slice(0, 2));
     } catch (err) {
@@ -59,6 +86,23 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({ world, onC
     } finally {
       setIsGenerating(false);
     }
+  };
+
+  const updateManualAttribute = (attr: keyof Attributes, change: number) => {
+      if (!generatedAttributes) return;
+      const currentVal = generatedAttributes[attr];
+      const newVal = currentVal + change;
+
+      // Bounds check: Min 1, Max 5
+      if (newVal < 1 || newVal > 5) return;
+      
+      // Points check
+      if (change > 0 && pointsPool <= 0) return;
+
+      const newAttrs = { ...generatedAttributes, [attr]: newVal };
+      setGeneratedAttributes(newAttrs);
+      setPointsPool(prev => prev - change);
+      setGeneratedDerived(calculateDerived(newAttrs));
   };
 
   const toggleSkillSelection = (skill: Skill) => {
@@ -73,6 +117,9 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({ world, onC
   const addCharacter = () => {
     if (!formData.name || !formData.concept || !formData.motivation || !generatedAttributes || !generatedDerived) return;
     
+    // Prevent adding if points not spent in manual mode (optional, but good for balance)
+    // For now, we allow it, maybe they want a weaker character.
+
     const newChar: Character = {
       id: crypto.randomUUID(),
       name: formData.name,
@@ -97,18 +144,45 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({ world, onC
     setGeneratedDerived(null);
     setGeneratedItems([]);
     setGeneratedWealth(0);
+    setPointsPool(16);
   };
 
   const removeCharacter = (id: string) => {
     setCharacters(characters.filter(c => c.id !== id));
   };
 
-  const AttributeDisplay = ({ label, value }: { label: string, value: number }) => (
-    <div className="flex flex-col items-center p-2 bg-slate-900 rounded border border-slate-700 relative overflow-hidden group">
-      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-amber-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{label}</span>
-      <span className={`text-xl font-bold font-cinzel ${value >= 4 ? 'text-amber-400' : 'text-slate-200'}`}>{value}</span>
-      <span className="text-[9px] text-slate-600 font-mono">Mod: {value - 2 >= 0 ? '+' : ''}{value - 2}</span>
+  const AttributeDisplay = ({ label, attrKey, value }: { label: string, attrKey: keyof Attributes, value: number }) => (
+    <div className={`flex flex-col items-center p-2 bg-slate-900 rounded border ${creationMode === 'manual' ? 'border-blue-900/50' : 'border-slate-700'} relative overflow-hidden group`}>
+      {creationMode === 'auto' && (
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-amber-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+      )}
+      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{label}</span>
+      
+      <div className="flex items-center gap-2">
+          {creationMode === 'manual' && (
+              <button 
+                onClick={() => updateManualAttribute(attrKey, -1)}
+                disabled={value <= 1}
+                className="w-6 h-6 flex items-center justify-center bg-slate-800 hover:bg-red-900/50 text-slate-400 hover:text-red-400 rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                  <Minus size={10} />
+              </button>
+          )}
+          
+          <span className={`text-xl font-bold font-cinzel w-6 text-center ${value >= 4 ? 'text-amber-400' : 'text-slate-200'}`}>{value}</span>
+          
+          {creationMode === 'manual' && (
+              <button 
+                onClick={() => updateManualAttribute(attrKey, 1)}
+                disabled={value >= 5 || pointsPool <= 0}
+                className="w-6 h-6 flex items-center justify-center bg-slate-800 hover:bg-green-900/50 text-slate-400 hover:text-green-400 rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                  <Plus size={10} />
+              </button>
+          )}
+      </div>
+
+      <span className="text-[9px] text-slate-600 font-mono mt-1">Mod: {value - 2 >= 0 ? '+' : ''}{value - 2}</span>
     </div>
   );
 
@@ -163,15 +237,41 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({ world, onC
 
               {/* Stats Generator Section */}
               <div className="bg-slate-950/50 p-4 rounded-lg border border-slate-800 space-y-4">
-                <div className="flex items-center justify-between">
-                  <label className="block text-xs uppercase tracking-wider text-amber-500 font-bold flex items-center gap-2">
-                     <Dna size={14} /> Atributos, Recursos & Itens
-                  </label>
+                <div className="flex flex-col gap-4">
+                    <div className="flex items-center justify-between">
+                        <label className="block text-xs uppercase tracking-wider text-amber-500 font-bold flex items-center gap-2">
+                            <Dna size={14} /> Atributos, Recursos & Itens
+                        </label>
+                    </div>
+
+                    {/* Creation Mode Toggle */}
+                    {!generatedAttributes && (
+                        <div className="flex bg-slate-900 p-1 rounded border border-slate-800">
+                            <button 
+                                type="button"
+                                onClick={() => setCreationMode('auto')}
+                                className={`flex-1 flex items-center justify-center gap-2 py-2 rounded text-xs font-bold transition-all ${creationMode === 'auto' ? 'bg-slate-800 text-amber-500 shadow' : 'text-slate-500 hover:text-slate-300'}`}
+                            >
+                                <Shuffle size={14} /> Automático (IA)
+                            </button>
+                            <button 
+                                type="button"
+                                onClick={() => setCreationMode('manual')}
+                                className={`flex-1 flex items-center justify-center gap-2 py-2 rounded text-xs font-bold transition-all ${creationMode === 'manual' ? 'bg-slate-800 text-blue-400 shadow' : 'text-slate-500 hover:text-slate-300'}`}
+                            >
+                                <PenTool size={14} /> Manual (Pontos)
+                            </button>
+                        </div>
+                    )}
                 </div>
                 
                 {generatedAttributes === null && (
                    <div className="text-center py-4">
-                    <p className="text-sm text-slate-400 mb-3">Defina um conceito para que o sistema distribua os pontos e gere itens iniciais.</p>
+                    <p className="text-sm text-slate-400 mb-3">
+                        {creationMode === 'auto' 
+                            ? "A IA definirá seus atributos com base no conceito." 
+                            : "A IA gerará itens e skills, mas você distribuirá os atributos."}
+                    </p>
                     {genError && <p className="text-red-400 text-xs mb-2">{genError}</p>}
                     <Button 
                       onClick={handleGenerateDetails} 
@@ -181,23 +281,30 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({ world, onC
                       className="w-full text-sm"
                       type="button"
                     >
-                      <Activity size={16} /> Gerar Estatísticas & Inventário (IA)
+                      <Activity size={16} /> Inicializar Personagem
                     </Button>
                   </div>
                 )}
 
                 {generatedAttributes && generatedDerived && (
                   <div className="space-y-4">
+                    {creationMode === 'manual' && (
+                        <div className="flex justify-between items-center bg-blue-900/20 px-3 py-2 rounded border border-blue-900/40">
+                            <span className="text-xs font-bold text-blue-200 uppercase">Pontos Disponíveis</span>
+                            <span className={`text-lg font-bold font-mono ${pointsPool > 0 ? 'text-amber-400' : 'text-slate-500'}`}>{pointsPool}</span>
+                        </div>
+                    )}
+
                     {/* Main Attributes */}
-                    <div className="grid grid-cols-4 md:grid-cols-8 gap-2">
-                      <AttributeDisplay label="FOR" value={generatedAttributes.FOR} />
-                      <AttributeDisplay label="DES" value={generatedAttributes.DES} />
-                      <AttributeDisplay label="CON" value={generatedAttributes.CON} />
-                      <AttributeDisplay label="INT" value={generatedAttributes.INT} />
-                      <AttributeDisplay label="SAB" value={generatedAttributes.SAB} />
-                      <AttributeDisplay label="CAR" value={generatedAttributes.CAR} />
-                      <AttributeDisplay label="AGI" value={generatedAttributes.AGI} />
-                      <AttributeDisplay label="SOR" value={generatedAttributes.SOR} />
+                    <div className="grid grid-cols-4 md:grid-cols-4 lg:grid-cols-8 gap-2">
+                      <AttributeDisplay label="FOR" attrKey="FOR" value={generatedAttributes.FOR} />
+                      <AttributeDisplay label="DES" attrKey="DES" value={generatedAttributes.DES} />
+                      <AttributeDisplay label="CON" attrKey="CON" value={generatedAttributes.CON} />
+                      <AttributeDisplay label="INT" attrKey="INT" value={generatedAttributes.INT} />
+                      <AttributeDisplay label="SAB" attrKey="SAB" value={generatedAttributes.SAB} />
+                      <AttributeDisplay label="CAR" attrKey="CAR" value={generatedAttributes.CAR} />
+                      <AttributeDisplay label="AGI" attrKey="AGI" value={generatedAttributes.AGI} />
+                      <AttributeDisplay label="SOR" attrKey="SOR" value={generatedAttributes.SOR} />
                     </div>
                     
                     {/* Derived Stats & Wealth */}
@@ -275,10 +382,11 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({ world, onC
                           setGeneratedDerived(null); 
                           setGeneratedItems([]);
                           setGeneratedWealth(0);
+                          setPointsPool(16);
                       }}
                       className="text-xs text-slate-500 hover:text-slate-300 underline w-full text-center"
                     >
-                      Redistribuir
+                      Reiniciar Distribuição
                     </button>
                   </div>
                 )}
