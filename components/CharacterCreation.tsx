@@ -58,7 +58,13 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({ world, onC
     setGeneratedWealth(0);
 
     try {
-      const details = await generateCharacterDetails(world, formData.concept);
+      const rpDetails = {
+          motivation: formData.motivation,
+          strength: formData.strength,
+          flaw: formData.flaw
+      };
+      
+      const details = await generateCharacterDetails(world, formData.concept, rpDetails);
       if (details.skills.length === 0) throw new Error("Falha ao gerar detalhes.");
       
       setGeneratedSkills(details.skills);
@@ -235,6 +241,42 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({ world, onC
                 </div>
               </div>
 
+              {/* RP Traits - Moved UP for Generation Context */}
+              <div>
+                <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">Motivação Principal</label>
+                <textarea 
+                  name="motivation" 
+                  value={formData.motivation || ''} 
+                  onChange={handleInputChange}
+                  rows={2}
+                  className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white focus:border-amber-500 outline-none resize-none"
+                  placeholder="O que seu personagem mais deseja?"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">Força (Roleplay)</label>
+                  <input 
+                    name="strength" 
+                    value={formData.strength || ''} 
+                    onChange={handleInputChange}
+                    className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white focus:border-amber-500 outline-none"
+                    placeholder="Ex: Destemido, Honrado..."
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">Fraqueza (Roleplay)</label>
+                  <input 
+                    name="flaw" 
+                    value={formData.flaw || ''} 
+                    onChange={handleInputChange}
+                    className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white focus:border-amber-500 outline-none"
+                    placeholder="Ex: Impulsivo, Ganancioso..."
+                  />
+                </div>
+              </div>
+
               {/* Stats Generator Section */}
               <div className="bg-slate-950/50 p-4 rounded-lg border border-slate-800 space-y-4">
                 <div className="flex flex-col gap-4">
@@ -269,7 +311,7 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({ world, onC
                    <div className="text-center py-4">
                     <p className="text-sm text-slate-400 mb-3">
                         {creationMode === 'auto' 
-                            ? "A IA definirá seus atributos com base no conceito." 
+                            ? "A IA definirá atributos, skills e itens baseados no seu Conceito, Força e Fraqueza." 
                             : "A IA gerará itens e skills, mas você distribuirá os atributos."}
                     </p>
                     {genError && <p className="text-red-400 text-xs mb-2">{genError}</p>}
@@ -390,41 +432,6 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({ world, onC
                     </button>
                   </div>
                 )}
-              </div>
-
-              <div>
-                <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">Motivação Principal</label>
-                <textarea 
-                  name="motivation" 
-                  value={formData.motivation || ''} 
-                  onChange={handleInputChange}
-                  rows={2}
-                  className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white focus:border-amber-500 outline-none resize-none"
-                  placeholder="O que seu personagem mais deseja?"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">Força (Roleplay)</label>
-                  <input 
-                    name="strength" 
-                    value={formData.strength || ''} 
-                    onChange={handleInputChange}
-                    className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white focus:border-amber-500 outline-none"
-                    placeholder="Ex: Destemido"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs uppercase tracking-wider text-slate-500 mb-1">Fraqueza (Roleplay)</label>
-                  <input 
-                    name="flaw" 
-                    value={formData.flaw || ''} 
-                    onChange={handleInputChange}
-                    className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white focus:border-amber-500 outline-none"
-                    placeholder="Ex: Impulsivo"
-                  />
-                </div>
               </div>
 
               <Button 

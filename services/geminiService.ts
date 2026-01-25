@@ -85,6 +85,7 @@ Seu papel é:
 - **CICLO DIA/NOITE**: Você DEVE manter a continuidade do tempo. Se a cena anterior foi à tarde e eles viajaram, agora pode ser noite. Retorne sempre o objeto 'timeData'.
 - **ESTILO LITERÁRIO**: Não seja breve. Escreva descrições ricas, atmosféricas e detalhadas.
 - **RITMO VARIADO**: Não force combate a todo turno. Permita cenas de exploração e comércio.
+- **ROLEPLAY PROFUNDO**: Considere sempre a FORÇA (Strength) e a FRAQUEZA (Flaw) dos personagens nas narrações. Personagens impulsivos devem ser tentados a agir impulsivamente; personagens fortes devem ter momentos para exibir essa força.
 
 === REGRAS CRÍTICAS DE MECÂNICA (LEIA ATENTAMENTE) ===
 
@@ -181,7 +182,7 @@ export const generateWorldPremise = async (manualInput?: string): Promise<WorldD
   });
 };
 
-export const generateCharacterDetails = async (world: WorldData, characterConcept: string): Promise<{ skills: Skill[], attributes: Attributes, derived: DerivedStats, startingItems: Item[], wealth: number }> => {
+export const generateCharacterDetails = async (world: WorldData, characterConcept: string, rpDetails?: { motivation?: string, strength?: string, flaw?: string }): Promise<{ skills: Skill[], attributes: Attributes, derived: DerivedStats, startingItems: Item[], wealth: number }> => {
   const schema: Schema = {
     type: Type.OBJECT,
     properties: {
@@ -221,8 +222,8 @@ export const generateCharacterDetails = async (world: WorldData, characterConcep
             description: { type: Type.STRING },
             effect: { type: Type.STRING, description: "Mechanical bonus (e.g., +2 Attack, +1d4 Damage)." },
             type: { type: Type.STRING, enum: ['consumable', 'equipment', 'misc'] },
-            slot: { type: Type.STRING, enum: ['back', 'chest', 'hands'], description: "Slot de equipamento." },
-            capacityBonus: { type: Type.INTEGER, description: "Only for 'back' items (backpacks)." }
+            slot: { type: Type.STRING, enum: ['back', 'chest', 'hands'], description: "Slot de equipamento. 'back' = Costas (Mochila, Capa, Manto). 'chest' = Corpo. 'hands' = Mãos." },
+            capacityBonus: { type: Type.INTEGER, description: "Bônus de capacidade (Apenas se for Mochila/Backpack). Capas têm 0." }
           },
           required: ["name", "description", "effect", "type"]
         }
@@ -236,9 +237,13 @@ export const generateCharacterDetails = async (world: WorldData, characterConcep
   Mundo: ${world.premise}
   Moeda: ${world.currencyName}
   Conceito: ${characterConcept}
+  ${rpDetails?.strength ? `PONTO FORTE PRINCIPAL (ROLEPLAY): ${rpDetails.strength}` : ''}
+  ${rpDetails?.flaw ? `FRAQUEZA PRINCIPAL (ROLEPLAY): ${rpDetails.flaw}` : ''}
+  ${rpDetails?.motivation ? `MOTIVAÇÃO: ${rpDetails.motivation}` : ''}
   
   Tarefa Rápida: Gere os dados mecânicos para este personagem em JSON.
-  - DESCRIÇÕES CURTAS e diretas (máx 12 palavras). Não escreva histórias longas nas descrições.
+  - **SKILLS TEMÁTICAS**: Crie habilidades que reflitam não apenas o conceito, mas também o Ponto Forte (Ex: Se é 'Corajoso', dê bônus contra medo; se é 'Forte', dê bônus de dano) e a Fraqueza (Ex: Se é 'Impulsivo', uma passiva de alto risco).
+  - DESCRIÇÕES CURTAS e diretas (máx 12 palavras).
   - Atributos equilibrados (1-5).
   - 4 Habilidades simples e funcionais.
   - 3 Itens Iniciais (Pelo menos 1 arma/foco em slot='hands').
@@ -272,7 +277,9 @@ export const generateCharacterDetails = async (world: WorldData, characterConcep
 };
 
 export const startNarrative = async (world: WorldData, characters: Character[]): Promise<{ storyText: string; activeEnemies: Enemy[]; activeAllies: Ally[]; activeNeutrals: NeutralNPC[]; mapData: MapData; timeData: TimeData }> => {
-  const characterDescriptions = characters.map(c => `- ${c.name} (${c.concept})`).join('\n');
+  const characterDescriptions = characters.map(c => 
+    `- ${c.name} (${c.concept}) | Motivação: "${c.motivation}" | Força: "${c.strength}" | Fraqueza: "${c.flaw}"`
+  ).join('\n');
 
   const schema: Schema = {
     type: Type.OBJECT,
@@ -349,8 +356,9 @@ export const startNarrative = async (world: WorldData, characters: Character[]):
                                 description: { type: Type.STRING },
                                 effect: { type: Type.STRING },
                                 type: { type: Type.STRING, enum: ['consumable', 'equipment', 'misc'] },
-                                slot: { type: Type.STRING, enum: ['back', 'chest', 'hands'] },
-                                price: { type: Type.INTEGER }
+                                slot: { type: Type.STRING, enum: ['back', 'chest', 'hands'], description: "Slot. 'back' = Costas (Mochila, Capa, Manto)." },
+                                price: { type: Type.INTEGER },
+                                capacityBonus: { type: Type.INTEGER, description: "Bônus de capacidade (Apenas Mochilas)." }
                             },
                             required: ["name", "description", "effect", "type", "price"]
                         }
@@ -389,6 +397,7 @@ export const startNarrative = async (world: WorldData, characters: Character[]):
   Moeda: ${world.currencyName}
 
   Escreva a introdução. Defina o Horário Inicial (timeData).
+  **IMPORTANTE**: Ao narrar, destaque como as Fraquezas (Flaws) ou Forças (Strengths) dos personagens influenciam sua situação inicial.
   **REGRA DA PRIMEIRA CENA**: A lista 'activeEnemies' DEVE SER VAZIA []. Não gere inimigos agora.
   **NEUTROS**: Gere NPCs neutros/mercadores se fizer sentido para a cena (Ex: uma praça de mercado).
   **MAPA**: Gere um 'mapData' 5x5 completo e válido.
@@ -433,7 +442,10 @@ export const processTurn = async (
   const characterSkillsContext = characters.map(c => {
       const activeSkills = c.skills.filter(s => s.type === 'active').map(s => `- [A] ${s.name}: ${s.description}`).join('\n');
       const passiveSkills = c.skills.filter(s => s.type === 'passive').map(s => `- [P] ${s.name}: ${s.description}`).join('\n');
-      return `PC: ${c.name}\n${activeSkills}\n${passiveSkills}`;
+      return `PC: ${c.name}
+      TRAÇOS: Força="${c.strength}", Fraqueza="${c.flaw}"
+      ${activeSkills}
+      ${passiveSkills}`;
   }).join('\n\n');
 
   // Construct Enemy Skill Context explicitly
@@ -561,9 +573,10 @@ export const processTurn = async (
                 description: { type: Type.STRING }, 
                 effect: { type: Type.STRING }, 
                 type: { type: Type.STRING }, 
-                slot: { type: Type.STRING }, 
-                price: { type: Type.INTEGER } 
-              }, 
+                slot: { type: Type.STRING, enum: ['back', 'chest', 'hands'], description: "Slot. 'back' = Costas (Mochila, Capa, Manto)." },
+                price: { type: Type.INTEGER },
+                capacityBonus: { type: Type.INTEGER, description: "Bônus de capacidade (Apenas Mochilas)." }
+              },
               required: ["name", "description", "effect", "type"] 
             } 
           }, 
@@ -665,8 +678,9 @@ export const processTurn = async (
                   description: { type: Type.STRING },
                   effect: { type: Type.STRING },
                   type: { type: Type.STRING, enum: ['consumable', 'equipment', 'misc'] },
-                  slot: { type: Type.STRING, enum: ['back', 'chest', 'hands'] },
-                  price: { type: Type.INTEGER }
+                  slot: { type: Type.STRING, enum: ['back', 'chest', 'hands'], description: "Slot. 'back' = Costas (Mochila, Capa, Manto)." },
+                  price: { type: Type.INTEGER },
+                  capacityBonus: { type: Type.INTEGER, description: "Bônus de capacidade (Apenas Mochilas)." }
                 },
                 required: ["name", "description", "effect", "type", "price"]
               }
@@ -705,6 +719,7 @@ export const processTurn = async (
 
   CONTEXTO DE HABILIDADES:
   ${characterSkillsContext}
+  *LEMBRE-SE*: Personagens devem agir de acordo com suas FRAQUEZAS (Flaws) e FORÇAS (Strengths). Se um personagem tem fraqueza "Covarde" e tenta atacar um Boss, narre o medo dele. Se tem força "Destemido", narre sua bravura.
 
   ${enemySkillsContext}
 

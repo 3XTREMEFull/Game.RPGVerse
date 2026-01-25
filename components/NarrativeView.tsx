@@ -1138,7 +1138,7 @@ export const NarrativeView: React.FC<NarrativeViewProps> = ({
                                     {(['back', 'chest', 'hands'] as EquipmentSlot[]).map(slot => {
                                         const equippedItem = char.equipment?.[slot];
                                         return (
-                                            <div key={slot} className="bg-slate-900 p-1.5 rounded border border-slate-700 flex flex-col items-center justify-center text-center relative group/slot">
+                                            <div key={slot} title={slot === 'back' ? 'Costas' : slot === 'chest' ? 'Corpo' : 'Mãos'} className="bg-slate-900 p-1.5 rounded border border-slate-700 flex flex-col items-center justify-center text-center relative group/slot cursor-help">
                                                 <span className="text-[8px] text-slate-500 font-bold uppercase mb-1">
                                                     {slot === 'back' && <Backpack size={10} />}
                                                     {slot === 'chest' && <Shirt size={10} />}
